@@ -5,7 +5,7 @@ from collections import deque
 import sys
 
 # --- CONFIGURATION ---
-SERIAL_PORT = 'COM3'  # Windows: 'COM3', Mac: '/dev/tty.usbmodem...'
+SERIAL_PORT = 'COM3'  # May differ for system
 BAUD_RATE = 2000000   # Must match Teensy code
 BUFFER_SIZE = 500     # Number of points to show on screen
 

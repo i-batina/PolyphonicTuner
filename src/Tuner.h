@@ -69,7 +69,7 @@ public:
     bufferReady = false;
   }
 
-  // NEW: Check amplitude to ignore silence
+  // Check amplitude to ignore silence
   int16_t getMaxAmplitude() {
     int16_t minVal = 32000;
     int16_t maxVal = -32000;

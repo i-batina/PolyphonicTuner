@@ -12,7 +12,7 @@ static constexpr float SAMPLE_RATE = 16000.0f;
 static constexpr float LOW_E_MIN_HZ = 50.0f;
 static constexpr float LOW_E_MAX_HZ = 90.0f;
 
-// ISR: keep it short—no Serial prints here
+// ISR
 void sampleISR() {
   adc.startConversion();
 
@@ -30,7 +30,7 @@ void setup() {
 
   // Flag if nothing prints
   if (CrashReport) {
-    Serial.print(CrashReport); // Teensy 4.x feature [web:70]
+    Serial.print(CrashReport); // Teensy 4.x feature, might be useful
   }
 
   Serial.println("STARTING PITCH DETECTOR...");
@@ -61,7 +61,7 @@ void loop() {
     f = tuner.detectPitch(SAMPLE_RATE);
   }
 
-  // Low E (currently channel 2): ignore anything outside expected range
+  // Low E ignore anything outside expected range
   if (!(f >= LOW_E_MIN_HZ && f <= LOW_E_MAX_HZ)) {
     f = 0.0f;
   }
