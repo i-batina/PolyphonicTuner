@@ -10,12 +10,9 @@ Tuner tuner("Monophonic");
 IntervalTimer sampleTimer;
 
 static constexpr float SAMPLE_RATE = 16000.0f;
+
 static constexpr float LOW_E_MIN_HZ = 50.0f;
 static constexpr float LOW_E_MAX_HZ = 90.0f;
-
-// Allow slightly wider range for debug (40Hz to 150Hz)
-// static constexpr float LOW_E_MIN_HZ = 40.0f;
-// static constexpr float LOW_E_MAX_HZ = 150.0f;
 
 // Array of note names
 const char *noteNames[] = {"C",  "C#", "D",  "D#", "E",  "F",
