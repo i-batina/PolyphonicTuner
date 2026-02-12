@@ -84,7 +84,7 @@ public:
 
   // Calculates Hz from the buffer
   float detectPitch(float sampleRate) {
-    // 1. Difference Function (Squared Difference)
+    // 1. Difference Function
     for (int tau = 0; tau < BUFFER_SIZE / 2; tau++)
       yinBuffer[tau] = 0;
 
@@ -95,31 +95,55 @@ public:
       }
     }
 
-    // 2. Cumulative mean normalized difference (CMND)
+    // CMND (Fixed Division by Zero)
     yinBuffer[0] = 1;
     float runningSum = 0;
     for (int tau = 1; tau < BUFFER_SIZE / 2; tau++) {
       runningSum += yinBuffer[tau];
-      yinBuffer[tau] *= tau;
-      yinBuffer[tau] /= runningSum;
+      if (runningSum < 0.0001) { // Protect against zero division
+        yinBuffer[tau] = 1;
+      } else {
+        yinBuffer[tau] *= tau;
+        yinBuffer[tau] /= runningSum;
+      }
     }
 
-    // 3. Absolute threshold
-    // Start search at tau=25 to ignore high freq harmonic noise (>660Hz)
-    for (int tau = 25; tau < BUFFER_SIZE / 2; tau++) {
+    // Absolute Threshold
+    // search specifically for the Low E range first to avoid harmonic
+    // errors. Low E (82Hz) is around tau=195. High limit 150Hz is tau=106. Low
+    // limit 50Hz is tau=320.
+
+    // Start slightly earlier (tau=80, approx 200Hz) to be safe
+    for (int tau = 80; tau < BUFFER_SIZE / 2; tau++) {
       if (yinBuffer[tau] < YIN_THRESHOLD) {
-        // Found dip, then now interpolate for precision
+
+        // Found dip, interpolate
         float y1 = (tau > 0) ? yinBuffer[tau - 1] : yinBuffer[tau];
         float y2 = yinBuffer[tau];
         float y3 =
             (tau + 1 < BUFFER_SIZE / 2) ? yinBuffer[tau + 1] : yinBuffer[tau];
 
-        // Parabolic interpolation formula
         float location = tau + (y3 - y1) / (2 * (2 * y2 - y3 - y1));
-
         return sampleRate / location;
       }
     }
+
+    // If no clear dip found, search for the global minimum as a fallback
+    int bestTau = -1;
+    float bestVal = 100.0;
+
+    for (int tau = 80; tau < BUFFER_SIZE / 2; tau++) {
+      if (yinBuffer[tau] < bestVal) {
+        bestVal = yinBuffer[tau];
+        bestTau = tau;
+      }
+    }
+
+    // Accept ok matches if they are the best found
+    if (bestTau > 0 && bestVal < 0.4) {
+      return sampleRate / (float)bestTau;
+    }
+
     return 0.0; // No pitch found
   }
 };
