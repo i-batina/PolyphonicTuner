@@ -3,26 +3,25 @@
 
 #include <Arduino.h>
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 1024  // Power of 2 for YIN, min 1024 for low E accuracy
+// NOTE: 2048 actually causes more scatter in low E
 #define YIN_THRESHOLD 0.15
 
 class Tuner {
-private:
+ private:
   int16_t buffer[BUFFER_SIZE];
   float yinBuffer[BUFFER_SIZE / 2];
   volatile int writeIdx = 0;
   volatile bool bufferReady = false;
 
-public:
+ public:
   String name;
 
   void removeDC() {
     int32_t sum = 0;
-    for (int i = 0; i < BUFFER_SIZE; i++)
-      sum += buffer[i];
+    for (int i = 0; i < BUFFER_SIZE; i++) sum += buffer[i];
     int16_t mean = (int16_t)(sum / BUFFER_SIZE);
-    for (int i = 0; i < BUFFER_SIZE; i++)
-      buffer[i] -= mean;
+    for (int i = 0; i < BUFFER_SIZE; i++) buffer[i] -= mean;
   }
 
   int16_t peakToPeak() {
@@ -30,10 +29,8 @@ public:
     int16_t maxVal = -32768;
     for (int i = 0; i < BUFFER_SIZE; i++) {
       int16_t v = buffer[i];
-      if (v < minVal)
-        minVal = v;
-      if (v > maxVal)
-        maxVal = v;
+      if (v < minVal) minVal = v;
+      if (v > maxVal) maxVal = v;
     }
     return (int16_t)(maxVal - minVal);
   }
@@ -54,10 +51,8 @@ public:
     int16_t maxVal = -32768;
     for (int i = 0; i < BUFFER_SIZE; i++) {
       int16_t v = buffer[i];
-      if (v < minVal)
-        minVal = v;
-      if (v > maxVal)
-        maxVal = v;
+      if (v < minVal) minVal = v;
+      if (v > maxVal) maxVal = v;
     }
     return (int32_t)(maxVal - minVal) < threshold;
   }
@@ -74,10 +69,8 @@ public:
     int16_t minVal = 32000;
     int16_t maxVal = -32000;
     for (int i = 0; i < BUFFER_SIZE; i++) {
-      if (buffer[i] < minVal)
-        minVal = buffer[i];
-      if (buffer[i] > maxVal)
-        maxVal = buffer[i];
+      if (buffer[i] < minVal) minVal = buffer[i];
+      if (buffer[i] > maxVal) maxVal = buffer[i];
     }
     return (maxVal - minVal);
   }
@@ -85,8 +78,7 @@ public:
   // Calculates Hz from the buffer
   float detectPitch(float sampleRate) {
     // 1. Difference Function
-    for (int tau = 0; tau < BUFFER_SIZE / 2; tau++)
-      yinBuffer[tau] = 0;
+    for (int tau = 0; tau < BUFFER_SIZE / 2; tau++) yinBuffer[tau] = 0;
 
     for (int tau = 1; tau < BUFFER_SIZE / 2; tau++) {
       for (int i = 0; i < BUFFER_SIZE / 2; i++) {
@@ -95,12 +87,12 @@ public:
       }
     }
 
-    // CMND (Fixed Division by Zero)
+    // CMND (Fixed division by zero)
     yinBuffer[0] = 1;
     float runningSum = 0;
     for (int tau = 1; tau < BUFFER_SIZE / 2; tau++) {
       runningSum += yinBuffer[tau];
-      if (runningSum < 0.0001) { // Protect against zero division
+      if (runningSum < 0.0001) {  // Protect against zero division
         yinBuffer[tau] = 1;
       } else {
         yinBuffer[tau] *= tau;
@@ -110,25 +102,31 @@ public:
 
     // Absolute Threshold
     // search specifically for the Low E range first to avoid harmonic
-    // errors. Low E (82Hz) is around tau=195. High limit 150Hz is tau=106. Low
+    // errors. Low E (82.41Hz) is around tau=195. high limit 150Hz is tau=106. Low
     // limit 50Hz is tau=320.
 
     // Start slightly earlier (tau=80, approx 200Hz) to be safe
     for (int tau = 80; tau < BUFFER_SIZE / 2; tau++) {
       if (yinBuffer[tau] < YIN_THRESHOLD) {
+        // Descend to the true minimum of this dip before interpolating.
+        // NOTE: first threshold crossing is the entry slope, not the bottom.
+        // NOTE: Interpolating at entry point causes approx 25 cent scatter.
+        while (tau + 1 < BUFFER_SIZE / 2 && yinBuffer[tau + 1] < yinBuffer[tau]) {
+          tau++;
+        }
 
-        // Found dip, interpolate
+        // Parabolic interpolation around the dip minimum
         float y1 = (tau > 0) ? yinBuffer[tau - 1] : yinBuffer[tau];
         float y2 = yinBuffer[tau];
-        float y3 =
-            (tau + 1 < BUFFER_SIZE / 2) ? yinBuffer[tau + 1] : yinBuffer[tau];
+        float y3 = (tau + 1 < BUFFER_SIZE / 2) ? yinBuffer[tau + 1] : yinBuffer[tau];
 
-        float location = tau + (y3 - y1) / (2 * (2 * y2 - y3 - y1));
+        float denom = 2 * (2 * y2 - y3 - y1);
+        float location = (denom != 0.0f) ? tau + (y3 - y1) / denom : tau;
         return sampleRate / location;
       }
     }
 
-    // If no clear dip found, search for the global minimum as a fallback
+    // Fallback: global minimum in search range, with interpolation
     int bestTau = -1;
     float bestVal = 100.0;
 
@@ -139,12 +137,17 @@ public:
       }
     }
 
-    // Accept ok matches if they are the best found
     if (bestTau > 0 && bestVal < 0.4) {
-      return sampleRate / (float)bestTau;
+      float y1 = yinBuffer[bestTau - 1];
+      float y2 = yinBuffer[bestTau];
+      float y3 = (bestTau + 1 < BUFFER_SIZE / 2) ? yinBuffer[bestTau + 1] : y2;
+
+      float denom = 2 * (2 * y2 - y3 - y1);
+      float location = (denom != 0.0f) ? bestTau + (y3 - y1) / denom : bestTau;
+      return sampleRate / location;
     }
 
-    return 0.0; // No pitch found
+    return 0.0;  // No pitch found
   }
 };
 #endif
