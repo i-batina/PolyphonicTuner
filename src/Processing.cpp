@@ -41,7 +41,7 @@ int Processing::getCentsOff(float freq) {
 }
 
 float Processing::medianFreq(float* arr, int n) {
-  float sorted[MEDIAN_FRAMES];
+  float sorted[MEDIAN_FRAMES] = {};
   for (int i = 0; i < n; i++) sorted[i] = arr[i];
   for (int i = 1; i < n; i++) {
     float key = sorted[i];

@@ -76,7 +76,8 @@ class ADCDriver {
   static constexpr int Pin_RESET  = 33;  // active high
 
   // Parallel bus D0...D15
-  static constexpr int DBUS[16] = {37, 38, 39, 40, 41, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23};
+  // March 11: changed pin 18->7, 19->6
+  static constexpr int DBUS[16] = {37, 38, 39, 40, 41, 13, 14, 15, 16, 17, 7, 6, 20, 21, 22, 23};
 
   // Timing constants in us
   static constexpr uint32_t CONVST_LOW_US    = 2;

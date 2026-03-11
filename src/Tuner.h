@@ -21,7 +21,10 @@ class Tuner {
 
   int16_t peakToPeak();
 
-  Tuner(String stringName) { name = stringName; }
+  Tuner(String stringName) : name(stringName) {
+    memset(buffer, 0, sizeof(buffer));
+    memset(yinBuffer, 0, sizeof(yinBuffer));
+  }
 
   void addSample(int16_t sample);
 
