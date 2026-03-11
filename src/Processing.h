@@ -33,6 +33,8 @@ class Processing {
   static void processString(
       Tuner& t, float minHz, float maxHz, float* history, int& histCount, const char* label);
 
+  static void printFun(const char* label, float freq);
+
   // ISR: one conversion captures all channels simultaneously on the ADC
   static void sampleISR();
 

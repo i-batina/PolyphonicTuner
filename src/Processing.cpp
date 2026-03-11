@@ -65,19 +65,24 @@ void Processing::processString(
       if (histCount >= MEDIAN_FRAMES) {
         float stableFreq = medianFreq(history, MEDIAN_FRAMES);
         histCount        = 0;
-        Serial.print("[");
-        Serial.print(label);
-        Serial.print("] Freq: ");
-        Serial.print(stableFreq, 2);
-        Serial.print(" Hz  |  Note: ");
-        Serial.print(getNoteName(stableFreq));
-        Serial.print("  |  Cents: ");
-        Serial.println(getCentsOff(stableFreq));
+        printFun(label, stableFreq);
       }
     }
   } else {
     histCount = 0;  // String went silent -> discard partial history
   }
+}
+
+// print helper
+void Processing::printFun(const char* label, float freq) {
+  Serial.print("[");
+  Serial.print(label);
+  Serial.print("] Freq: ");
+  Serial.print(freq, 2);
+  Serial.print(" Hz  |  Note: ");
+  Serial.print(getNoteName(freq));
+  Serial.print("  |  Cents: ");
+  Serial.println(getCentsOff(freq));
 }
 
 void Processing::sampleISR() {
