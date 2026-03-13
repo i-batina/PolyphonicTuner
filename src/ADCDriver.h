@@ -69,15 +69,15 @@ class ADCDriver {
 
  private:
   // Control pins
-  static constexpr int Pin_CONVST = 34;  // falling edge starts conversion
-  static constexpr int Pin_BUSY   = 35;  // BUSY high during conversion
-  static constexpr int Pin_RD     = 36;  // active low
-  static constexpr int Pin_CS     = 32;  // active low
-  static constexpr int Pin_RESET  = 33;  // active high
+  static constexpr int Pin_CONVST = 32;  // falling edge starts conversion
+  static constexpr int Pin_BUSY   = 34;  // BUSY high during conversion
+  static constexpr int Pin_RD     = 35;  // active low
+  static constexpr int Pin_CS     = 30;  // active low
+  static constexpr int Pin_RESET  = 31;  // active high
 
   // Parallel bus D0...D15
   // March 11: changed pin 18->7, 19->6
-  static constexpr int DBUS[16] = {37, 38, 39, 40, 41, 13, 14, 15, 16, 17, 7, 6, 20, 21, 22, 23};
+  static constexpr int DBUS[16] = {27, 38, 26, 0, 12, 1, 11, 2, 10, 3, 9, 4, 8, 5, 7, 6};
 
   // Timing constants in us
   static constexpr uint32_t CONVST_LOW_US    = 2;

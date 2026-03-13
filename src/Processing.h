@@ -17,8 +17,10 @@ class Processing {
   static constexpr int MEDIAN_FRAMES = 5;
   static float         freqHistoryLowE[MEDIAN_FRAMES];
   static int           histCountLowE;
+  static bool          reportedLowE;
   static float         freqHistoryA[MEDIAN_FRAMES];
   static int           histCountA;
+  static bool          reportedA;
 
  public:
   static String getNoteName(float freq);
@@ -30,8 +32,8 @@ class Processing {
   static float medianFreq(float* arr, int n);
 
   // Process one strings ready buffer, i.e. silence-check, pitch detect, median filter, print
-  static void processString(
-      Tuner& t, float minHz, float maxHz, float* history, int& histCount, const char* label);
+  static void processString(Tuner& t, float minHz, float maxHz, float* history, int& histCount,
+      bool& reported, const char* label);
 
   static void printFun(const char* label, float freq);
 

@@ -7,8 +7,10 @@
 // Out-of-class definitions for non-constexpr static members
 float Processing::freqHistoryLowE[Processing::MEDIAN_FRAMES];
 int   Processing::histCountLowE = 0;
+bool  Processing::reportedLowE  = false;
 float Processing::freqHistoryA[Processing::MEDIAN_FRAMES];
 int   Processing::histCountA = 0;
+bool  Processing::reportedA  = false;
 
 Tuner         tunerLowE("Low E");
 Tuner         tunerA("A");
@@ -55,21 +57,25 @@ float Processing::medianFreq(float* arr, int n) {
   return sorted[n / 2];
 }
 
-void Processing::processString(
-    Tuner& t, float minHz, float maxHz, float* history, int& histCount, const char* label) {
+void Processing::processString(Tuner& t, float minHz, float maxHz, float* history, int& histCount,
+    bool& reported, const char* label) {
   if (t.peakToPeak() > 500) {
-    t.removeDC();
-    float freq = t.detectPitch(SAMPLE_RATE);
-    if (freq > minHz && freq < maxHz) {
-      history[histCount++] = freq;
-      if (histCount >= MEDIAN_FRAMES) {
-        float stableFreq = medianFreq(history, MEDIAN_FRAMES);
-        histCount        = 0;
-        printFun(label, stableFreq);
+    if (!reported) {
+      t.removeDC();
+      float freq = t.detectPitch(SAMPLE_RATE);
+      if (freq > minHz && freq < maxHz) {
+        history[histCount++] = freq;
+        if (histCount >= MEDIAN_FRAMES) {
+          float stableFreq = medianFreq(history, MEDIAN_FRAMES);
+          histCount        = 0;
+          reported         = true;
+          printFun(label, stableFreq);
+        }
       }
     }
   } else {
     histCount = 0;  // String went silent -> discard partial history
+    reported  = false;
   }
 }
 
@@ -120,12 +126,13 @@ void Processing::loop() {
   sampleTimer.end();
 
   if (tunerLowE.isReady()) {
-    processString(tunerLowE, LOW_E_MIN_HZ, LOW_E_MAX_HZ, freqHistoryLowE, histCountLowE, "Low E");
+    processString(tunerLowE, LOW_E_MIN_HZ, LOW_E_MAX_HZ, freqHistoryLowE, histCountLowE,
+        reportedLowE, "Low E");
     tunerLowE.reset();
   }
 
   if (tunerA.isReady()) {
-    processString(tunerA, A_MIN_HZ, A_MAX_HZ, freqHistoryA, histCountA, "A");
+    processString(tunerA, A_MIN_HZ, A_MAX_HZ, freqHistoryA, histCountA, reportedA, "A");
     tunerA.reset();
   }
 
