@@ -1,5 +1,6 @@
 #include "Processing.h"
 #include "ADCDriver.h"
+#include "MotorLogic.h"
 
 #include <IntervalTimer.h>
 #include <math.h>
@@ -14,6 +15,7 @@ Tuner         tunerLowE("Low E");
 Tuner         tunerA("A");
 ADCDriver     adc;
 IntervalTimer sampleTimer;
+MotorLogic    motorLogic;
 
 String Processing::getNoteName(float freq) {
   // Handle silence/noise
@@ -55,7 +57,7 @@ float Processing::medianFreq(float* arr, int n) {
   return sorted[n / 2];
 }
 
-void Processing::processString(
+float Processing::processString(
     Tuner& t, float minHz, float maxHz, float* history, int& histCount, const char* label) {
   if (t.peakToPeak() > 500) {
     t.removeDC();
@@ -66,11 +68,13 @@ void Processing::processString(
         float stableFreq = medianFreq(history, MEDIAN_FRAMES);
         histCount        = 0;
         printFun(label, stableFreq);
+        return stableFreq;
       }
     }
   } else {
     histCount = 0;  // String went silent -> discard partial history
   }
+  return 0.0f;
 }
 
 // print helper
@@ -108,6 +112,7 @@ void Processing::setup() {
   Serial.println("STARTING PITCH DETECTOR...");
 
   adc.begin();
+  motorLogic.begin();
 
   // 16kHz => 62.5 us period
   sampleTimer.begin(sampleISR, 62.5);
@@ -117,17 +122,30 @@ void Processing::setup() {
 
 void Processing::loop() {
   if (!tunerLowE.isReady() && !tunerA.isReady()) return;
+
+  // Stop sampling and motors before pitch detection.
+  // Prevents motor vibration from contaminating the piezo ADC readings.
   sampleTimer.end();
+  motorLogic.stopAll();
+
+  float freqLowE = 0.0f;
+  float freqA    = 0.0f;
 
   if (tunerLowE.isReady()) {
-    processString(tunerLowE, LOW_E_MIN_HZ, LOW_E_MAX_HZ, freqHistoryLowE, histCountLowE, "Low E");
+    freqLowE = processString(
+        tunerLowE, LOW_E_MIN_HZ, LOW_E_MAX_HZ, freqHistoryLowE, histCountLowE, "Low E");
     tunerLowE.reset();
   }
 
   if (tunerA.isReady()) {
-    processString(tunerA, A_MIN_HZ, A_MAX_HZ, freqHistoryA, histCountA, "A");
+    freqA = processString(tunerA, A_MIN_HZ, A_MAX_HZ, freqHistoryA, histCountA, "A");
     tunerA.reset();
   }
+
+  // Update motor speeds from latest stable readings (0 = silent = stop motor).
+  // Motors will run during the next 64 ms sampling window, then stop again.
+  motorLogic.update(0, freqLowE);
+  motorLogic.update(1, freqA);
 
   sampleTimer.begin(sampleISR, 62.5);
 }

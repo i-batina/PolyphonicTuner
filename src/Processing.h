@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "Tuner.h"
+#include "MotorLogic.h"
 
 class Processing {
  private:
@@ -29,8 +30,9 @@ class Processing {
   // Insertion-sort median over n values
   static float medianFreq(float* arr, int n);
 
-  // Process one strings ready buffer, i.e. silence-check, pitch detect, median filter, print
-  static void processString(
+  // Process one string's ready buffer: silence-check, pitch detect, median filter, print.
+  // Returns the stable median frequency once MEDIAN_FRAMES are accumulated, else 0.
+  static float processString(
       Tuner& t, float minHz, float maxHz, float* history, int& histCount, const char* label);
 
   static void printFun(const char* label, float freq);
