@@ -11,9 +11,25 @@ bool  Processing::reportedLowE  = false;
 float Processing::freqHistoryA[Processing::MEDIAN_FRAMES];
 int   Processing::histCountA = 0;
 bool  Processing::reportedA  = false;
+float Processing::freqHistoryD[Processing::MEDIAN_FRAMES];
+int   Processing::histCountD = 0;
+bool  Processing::reportedD  = false;
+float Processing::freqHistoryG[Processing::MEDIAN_FRAMES];
+int   Processing::histCountG = 0;
+bool  Processing::reportedG  = false;
+float Processing::freqHistoryB[Processing::MEDIAN_FRAMES];
+int   Processing::histCountB = 0;
+bool  Processing::reportedB  = false;
+float Processing::freqHistoryHiE[Processing::MEDIAN_FRAMES];
+int   Processing::histCountHiE = 0;
+bool  Processing::reportedHiE  = false;
 
 Tuner         tunerLowE("Low E");
 Tuner         tunerA("A");
+Tuner         tunerD("D");
+Tuner         tunerG("G");
+Tuner         tunerB("B");
+Tuner         tunerHiE("High E");
 ADCDriver     adc;
 IntervalTimer sampleTimer;
 
@@ -59,7 +75,8 @@ float Processing::medianFreq(float* arr, int n) {
 
 void Processing::processString(Tuner& t, float minHz, float maxHz, float* history, int& histCount,
     bool& reported, const char* label) {
-  if (t.peakToPeak() > 500) {
+  if (t.peakToPeak() > 200) {  // 200 accommodates higher strings (B, Hi E) which decay faster
+                               // initially 500
     if (!reported) {
       t.removeDC();
       float freq = t.detectPitch(SAMPLE_RATE);
@@ -97,8 +114,12 @@ void Processing::sampleISR() {
 
   int16_t samples[2];
   adc.readChannels(samples, 2);  // samples[0]=CH1 (Low E), samples[1]=CH2 (A)
-  tunerLowE.addSample(samples[0]);
-  tunerA.addSample(samples[1]);
+  // tunerLowE.addSample(samples[0]);
+  // tunerA.addSample(samples[1]);
+  // tunerD.addSample(samples[1]);
+  // tunerG.addSample(samples[1]);
+  // tunerB.addSample(samples[1]);
+  tunerHiE.addSample(samples[1]);
 }
 
 void Processing::setup() {
@@ -122,7 +143,9 @@ void Processing::setup() {
 }
 
 void Processing::loop() {
-  if (!tunerLowE.isReady() && !tunerA.isReady()) return;
+  if (!tunerLowE.isReady() && !tunerA.isReady() && !tunerD.isReady() && !tunerG.isReady() &&
+      !tunerB.isReady() && !tunerHiE.isReady())
+    return;
   sampleTimer.end();
 
   if (tunerLowE.isReady()) {
@@ -134,6 +157,27 @@ void Processing::loop() {
   if (tunerA.isReady()) {
     processString(tunerA, A_MIN_HZ, A_MAX_HZ, freqHistoryA, histCountA, reportedA, "A");
     tunerA.reset();
+  }
+
+  if (tunerD.isReady()) {
+    processString(tunerD, D_MIN_HZ, D_MAX_HZ, freqHistoryD, histCountD, reportedD, "D");
+    tunerD.reset();
+  }
+
+  if (tunerG.isReady()) {
+    processString(tunerG, G_MIN_HZ, G_MAX_HZ, freqHistoryG, histCountG, reportedG, "G");
+    tunerG.reset();
+  }
+
+  if (tunerB.isReady()) {
+    processString(tunerB, B_MIN_HZ, B_MAX_HZ, freqHistoryB, histCountB, reportedB, "B");
+    tunerB.reset();
+  }
+
+  if (tunerHiE.isReady()) {
+    processString(
+        tunerHiE, HI_E_MIN_HZ, HI_E_MAX_HZ, freqHistoryHiE, histCountHiE, reportedHiE, "High E");
+    tunerHiE.reset();
   }
 
   sampleTimer.begin(sampleISR, 62.5);

@@ -80,11 +80,9 @@ float Tuner::detectPitch(float sampleRate) {
   }
 
   // Absolute Threshold
-  // search specifically for the Low E range first to avoid harmonic
-  // errors. Low E (82.41Hz) is around tau=195. high limit 150Hz is tau=106. Low
-  // limit 50Hz is tau=320.
-  // Start slightly earlier (tau=80, approx 200Hz) to be safe
-  for (int tau = 80; tau < BUFFER_SIZE / 2; tau++) {
+  // tau=35 covers up to ~457 Hz (Hi E=329.63Hz -> tau~49, B=246.94Hz -> tau~65).
+  // The frequency gate in processString filters any harmonic false positives.
+  for (int tau = 35; tau < BUFFER_SIZE / 2; tau++) {
     if (yinBuffer[tau] < YIN_THRESHOLD) {
       // Descend to the true minimum of this dip before interpolating.
       // NOTE: first threshold crossing is the entry slope, not the bottom.
@@ -108,7 +106,7 @@ float Tuner::detectPitch(float sampleRate) {
   int   bestTau = -1;
   float bestVal = 100.0;
 
-  for (int tau = 80; tau < BUFFER_SIZE / 2; tau++) {
+  for (int tau = 35; tau < BUFFER_SIZE / 2; tau++) {
     if (yinBuffer[tau] < bestVal) {
       bestVal = yinBuffer[tau];
       bestTau = tau;
