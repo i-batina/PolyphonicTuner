@@ -4,26 +4,6 @@
 #include <IntervalTimer.h>
 #include <math.h>
 
-// Out-of-class definitions for non-constexpr static members
-float Processing::freqHistoryLowE[Processing::MEDIAN_FRAMES];
-int   Processing::histCountLowE = 0;
-bool  Processing::reportedLowE  = false;
-float Processing::freqHistoryA[Processing::MEDIAN_FRAMES];
-int   Processing::histCountA = 0;
-bool  Processing::reportedA  = false;
-float Processing::freqHistoryD[Processing::MEDIAN_FRAMES];
-int   Processing::histCountD = 0;
-bool  Processing::reportedD  = false;
-float Processing::freqHistoryG[Processing::MEDIAN_FRAMES];
-int   Processing::histCountG = 0;
-bool  Processing::reportedG  = false;
-float Processing::freqHistoryB[Processing::MEDIAN_FRAMES];
-int   Processing::histCountB = 0;
-bool  Processing::reportedB  = false;
-float Processing::freqHistoryHiE[Processing::MEDIAN_FRAMES];
-int   Processing::histCountHiE = 0;
-bool  Processing::reportedHiE  = false;
-
 Tuner         tunerLowE("Low E");
 Tuner         tunerA("A");
 Tuner         tunerD("D");
@@ -75,24 +55,43 @@ float Processing::medianFreq(float* arr, int n) {
 
 void Processing::processString(Tuner& t, float minHz, float maxHz, float* history, int& histCount,
     bool& reported, const char* label) {
-  if (t.peakToPeak() > 200) {  // 200 accommodates higher strings (B, Hi E) which decay faster
-                               // initially 500
-    if (!reported) {
-      t.removeDC();
-      float freq = t.detectPitch(SAMPLE_RATE);
-      if (freq > minHz && freq < maxHz) {
-        history[histCount++] = freq;
-        if (histCount >= MEDIAN_FRAMES) {
-          float stableFreq = medianFreq(history, MEDIAN_FRAMES);
-          histCount        = 0;
-          reported         = true;
-          printFun(label, stableFreq);
-        }
-      }
+  int16_t p2p = t.peakToPeak();
+
+  if (p2p <= 200) {
+    // True silence: reset everything
+    histCount           = 0;
+    reported            = false;
+    t.minP2PSinceReport = INT16_MAX;
+    return;
+  }
+
+  // String is active (p2p > 200)
+  if (reported) {
+    // Onset detection: track the post-report amplitude minimum, then watch for
+    // a >=50% upward jump signalling a fresh pluck. This unblocks re-detection
+    // without waiting for slow-decaying strings (B, Hi E) to fully go silent.
+    if (p2p < t.minP2PSinceReport) t.minP2PSinceReport = p2p;
+    if (p2p > t.minP2PSinceReport * 1.5f) {
+      // New pluck — reset and wait for the next clean buffer
+      histCount           = 0;
+      reported            = false;
+      t.minP2PSinceReport = INT16_MAX;
     }
-  } else {
-    histCount = 0;  // String went silent -> discard partial history
-    reported  = false;
+    return;
+  }
+
+  // Not yet reported: detect pitch
+  t.removeDC();
+  float freq = t.detectPitch(SAMPLE_RATE);
+  if (freq > minHz && freq < maxHz) {
+    history[histCount++] = freq;
+    if (histCount >= MEDIAN_FRAMES) {
+      float stableFreq    = medianFreq(history, MEDIAN_FRAMES);
+      histCount           = 0;
+      reported            = true;
+      t.minP2PSinceReport = INT16_MAX;  // begin tracking post-report minimum
+      printFun(label, stableFreq);
+    }
   }
 }
 
@@ -114,12 +113,17 @@ void Processing::sampleISR() {
 
   int16_t samples[2];
   adc.readChannels(samples, 2);  // samples[0]=CH1 (Low E), samples[1]=CH2 (A)
-  // tunerLowE.addSample(samples[0]);
+  tunerLowE.addSample(samples[1]);
   // tunerA.addSample(samples[1]);
   // tunerD.addSample(samples[1]);
   // tunerG.addSample(samples[1]);
   // tunerB.addSample(samples[1]);
-  tunerHiE.addSample(samples[1]);
+  // tunerHiE.addSample(samples[1]);
+}
+
+bool Processing::noneReady() {
+  return !tunerLowE.isReady() && !tunerA.isReady() && !tunerD.isReady() && !tunerG.isReady() &&
+         !tunerB.isReady() && !tunerHiE.isReady();
 }
 
 void Processing::setup() {
@@ -143,42 +147,46 @@ void Processing::setup() {
 }
 
 void Processing::loop() {
-  if (!tunerLowE.isReady() && !tunerA.isReady() && !tunerD.isReady() && !tunerG.isReady() &&
-      !tunerB.isReady() && !tunerHiE.isReady())
-    return;
+  if (noneReady()) return;
   sampleTimer.end();
 
   if (tunerLowE.isReady()) {
-    processString(tunerLowE, LOW_E_MIN_HZ, LOW_E_MAX_HZ, freqHistoryLowE, histCountLowE,
-        reportedLowE, "Low E");
+    processString(
+        tunerLowE, getMinHz(0), getMaxHz(0), freqHistoryLowE, histCountLowE, reportedLowE, "Low E");
     tunerLowE.reset();
   }
 
   if (tunerA.isReady()) {
-    processString(tunerA, A_MIN_HZ, A_MAX_HZ, freqHistoryA, histCountA, reportedA, "A");
+    processString(tunerA, getMinHz(1), getMaxHz(1), freqHistoryA, histCountA, reportedA, "A");
     tunerA.reset();
   }
 
   if (tunerD.isReady()) {
-    processString(tunerD, D_MIN_HZ, D_MAX_HZ, freqHistoryD, histCountD, reportedD, "D");
+    processString(tunerD, getMinHz(2), getMaxHz(2), freqHistoryD, histCountD, reportedD, "D");
     tunerD.reset();
   }
 
   if (tunerG.isReady()) {
-    processString(tunerG, G_MIN_HZ, G_MAX_HZ, freqHistoryG, histCountG, reportedG, "G");
+    processString(tunerG, getMinHz(3), getMaxHz(3), freqHistoryG, histCountG, reportedG, "G");
     tunerG.reset();
   }
 
   if (tunerB.isReady()) {
-    processString(tunerB, B_MIN_HZ, B_MAX_HZ, freqHistoryB, histCountB, reportedB, "B");
+    processString(tunerB, getMinHz(4), getMaxHz(4), freqHistoryB, histCountB, reportedB, "B");
     tunerB.reset();
   }
 
   if (tunerHiE.isReady()) {
     processString(
-        tunerHiE, HI_E_MIN_HZ, HI_E_MAX_HZ, freqHistoryHiE, histCountHiE, reportedHiE, "High E");
+        tunerHiE, getMinHz(5), getMaxHz(5), freqHistoryHiE, histCountHiE, reportedHiE, "High E");
     tunerHiE.reset();
   }
 
   sampleTimer.begin(sampleISR, 62.5);
 }
+
+// Helpers
+
+float Processing::getMinHz(int strIdx) { return MIN_HZ[strIdx]; }
+
+float Processing::getMaxHz(int strIdx) { return MAX_HZ[strIdx]; }

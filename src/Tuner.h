@@ -15,7 +15,8 @@ class Tuner {
   volatile bool bufferReady = false;
 
  public:
-  String name;
+  String  name;
+  int16_t minP2PSinceReport = INT16_MAX;  // for onset detection
 
   void removeDC();
 
