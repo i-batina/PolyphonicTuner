@@ -1,5 +1,6 @@
 #include "Processing.h"
 #include "ADCDriver.h"
+#include "MotorControl.h"
 
 #include <IntervalTimer.h>
 #include <math.h>
@@ -12,6 +13,7 @@ Tuner         tunerB("B");
 Tuner         tunerHiE("High E");
 ADCDriver     adc;
 IntervalTimer sampleTimer;
+MotorControl  motor;
 
 String Processing::getNoteName(float freq) {
   // Handle silence/noise
@@ -28,7 +30,7 @@ String Processing::getNoteName(float freq) {
   int octave = (noteNum / 12) - 1;
 
   // Format result
-  return String(noteNames[noteIndex]) + String(octave);
+  return String(_noteNames[noteIndex]) + String(octave);
 }
 
 int Processing::getCentsOff(float freq) {
@@ -36,6 +38,13 @@ int Processing::getCentsOff(float freq) {
   int   noteNum      = (int)(noteNumFloat + 0.5);
   float diff         = noteNumFloat - noteNum;
   return (int)(diff * 100);
+}
+
+float Processing::getCentsOffTarget(float targetFreq, float freq) {
+  float targetNoteNumFloat = 69 + 12 * log2(targetFreq / 440.0);
+  float noteNumFloat       = 69 + 12 * log2(freq / 440.0);
+  float diff               = noteNumFloat - targetNoteNumFloat;
+  return diff * 100;
 }
 
 float Processing::medianFreq(float* arr, int n) {
@@ -53,8 +62,8 @@ float Processing::medianFreq(float* arr, int n) {
   return sorted[n / 2];
 }
 
-void Processing::processString(Tuner& t, float minHz, float maxHz, float* history, int& histCount,
-    bool& reported, const char* label) {
+float Processing::processString(Tuner& t, float minHz, float maxHz, float* history, int& histCount,
+    bool& reported, const char* label, float targetFreq) {
   int16_t p2p = t.peakToPeak();
 
   if (p2p <= 200) {
@@ -62,7 +71,7 @@ void Processing::processString(Tuner& t, float minHz, float maxHz, float* histor
     histCount           = 0;
     reported            = false;
     t.minP2PSinceReport = INT16_MAX;
-    return;
+    return 0.0f;
   }
 
   // String is active (p2p > 200)
@@ -77,7 +86,7 @@ void Processing::processString(Tuner& t, float minHz, float maxHz, float* histor
       reported            = false;
       t.minP2PSinceReport = INT16_MAX;
     }
-    return;
+    return 0.0f;
   }
 
   // Not yet reported: detect pitch
@@ -90,40 +99,26 @@ void Processing::processString(Tuner& t, float minHz, float maxHz, float* histor
       histCount           = 0;
       reported            = true;
       t.minP2PSinceReport = INT16_MAX;  // begin tracking post-report minimum
-      printFun(label, stableFreq);
+      printFun(label, stableFreq, targetFreq);
+      tunePrintHelper(fabs(stableFreq - targetFreq) < 1.0f, stableFreq, targetFreq);
+      return stableFreq;
     }
   }
-}
-
-// print helper
-void Processing::printFun(const char* label, float freq) {
-  Serial.print("[");
-  Serial.print(label);
-  Serial.print("] Freq: ");
-  Serial.print(freq, 2);
-  Serial.print(" Hz  |  Note: ");
-  Serial.print(getNoteName(freq));
-  Serial.print("  |  Cents: ");
-  Serial.println(getCentsOff(freq));
+  return 0.0f;
 }
 
 void Processing::sampleISR() {
   adc.startConversion();
   delayMicroseconds(5);  // tCONV max = 4.2 us (AD7606, 8-ch, no oversampling)
 
-  int16_t samples[2];
-  adc.readChannels(samples, 2);  // samples[0]=CH1 (Low E), samples[1]=CH2 (A)
-  tunerLowE.addSample(samples[1]);
-  // tunerA.addSample(samples[1]);
-  // tunerD.addSample(samples[1]);
-  // tunerG.addSample(samples[1]);
-  // tunerB.addSample(samples[1]);
-  // tunerHiE.addSample(samples[1]);
-}
-
-bool Processing::noneReady() {
-  return !tunerLowE.isReady() && !tunerA.isReady() && !tunerD.isReady() && !tunerG.isReady() &&
-         !tunerB.isReady() && !tunerHiE.isReady();
+  int16_t samples[6];
+  adc.readChannels(samples, 6);
+  tunerLowE.addSample(samples[0]);
+  tunerA.addSample(samples[2]);
+  tunerD.addSample(samples[1]);
+  tunerG.addSample(samples[3]);
+  tunerB.addSample(samples[4]);
+  tunerHiE.addSample(samples[5]);
 }
 
 void Processing::setup() {
@@ -138,6 +133,7 @@ void Processing::setup() {
 
   Serial.println("STARTING PITCH DETECTOR...");
 
+  motor.setup();
   adc.begin();
 
   // 16kHz => 62.5 us period
@@ -150,43 +146,76 @@ void Processing::loop() {
   if (noneReady()) return;
   sampleTimer.end();
 
-  if (tunerLowE.isReady()) {
-    processString(
-        tunerLowE, getMinHz(0), getMaxHz(0), freqHistoryLowE, histCountLowE, reportedLowE, "Low E");
-    tunerLowE.reset();
-  }
+  if (tunerLowE.isReady())
+    loopProcessHelper(
+        tunerLowE, 0, _freqHistoryLowE, _histCountLowE, _reportedLowE, "Low E", 82.41f);
 
-  if (tunerA.isReady()) {
-    processString(tunerA, getMinHz(1), getMaxHz(1), freqHistoryA, histCountA, reportedA, "A");
-    tunerA.reset();
-  }
+  if (tunerA.isReady())
+    loopProcessHelper(tunerA, 1, _freqHistoryA, _histCountA, _reportedA, "A", 110.0f);
 
-  if (tunerD.isReady()) {
-    processString(tunerD, getMinHz(2), getMaxHz(2), freqHistoryD, histCountD, reportedD, "D");
-    tunerD.reset();
-  }
+  if (tunerD.isReady())
+    loopProcessHelper(tunerD, 2, _freqHistoryD, _histCountD, _reportedD, "D", 146.8f);
 
-  if (tunerG.isReady()) {
-    processString(tunerG, getMinHz(3), getMaxHz(3), freqHistoryG, histCountG, reportedG, "G");
-    tunerG.reset();
-  }
+  if (tunerG.isReady())
+    loopProcessHelper(tunerG, 3, _freqHistoryG, _histCountG, _reportedG, "G", 196.0f);
 
   if (tunerB.isReady()) {
-    processString(tunerB, getMinHz(4), getMaxHz(4), freqHistoryB, histCountB, reportedB, "B");
-    tunerB.reset();
+    loopProcessHelper(tunerB, 4, _freqHistoryB, _histCountB, _reportedB, "B", 246.9f);
   }
 
-  if (tunerHiE.isReady()) {
-    processString(
-        tunerHiE, getMinHz(5), getMaxHz(5), freqHistoryHiE, histCountHiE, reportedHiE, "High E");
-    tunerHiE.reset();
-  }
+  if (tunerHiE.isReady())
+    loopProcessHelper(tunerHiE, 5, _freqHistoryHiE, _histCountHiE, _reportedHiE, "High E", 329.6f);
 
   sampleTimer.begin(sampleISR, 62.5);
 }
 
 // Helpers
+void Processing::loopProcessHelper(Tuner& tuner, int strIdx, float* freqHistory, int& histCount,
+    bool& reported, const char* label, float targetFreq) {
+  float freq = processString(tuner, getMinHz(strIdx), getMaxHz(strIdx), freqHistory, histCount,
+      reported, label, targetFreq);
+  if (freq > 0.0f) {
+    float absCents = fabsf(getCentsOffTarget(targetFreq, freq));
+    float t        = constrain((absCents - 2.0f) / (CENTS_MAX_CLAMP - 2.0f), 0.0f, 1.0f);
+    int   spinMs   = MIN_SPINS_MS + (int)(t * (MAX_SPINS_MS - MIN_SPINS_MS));
+
+    motor.tune(targetFreq, freq);
+    delay(spinMs);  // brief delay to allow motor response before processing next string
+    motor.stopAllMotors();
+    delay(600);         // wait for string to stop vibrating from motor
+    reported  = false;  // allow fresh pitch reading w/o re plucking
+    histCount = 0;      // reset median history for fresh reading
+  }
+  tuner.reset();
+}
+
+bool Processing::noneReady() {
+  return !tunerLowE.isReady() && !tunerA.isReady() && !tunerD.isReady() && !tunerG.isReady() &&
+         !tunerB.isReady() && !tunerHiE.isReady();
+}
+void Processing::printFun(const char* label, float freq, float targetFreq) {
+  Serial.print("[");
+  Serial.print(label);
+  Serial.print("] Freq: ");
+  Serial.print(freq, 2);
+  Serial.print(" Hz  |  Note: ");
+  Serial.print(getNoteName(freq));
+  Serial.print("  |  Cents: ");
+  Serial.println(getCentsOffTarget(targetFreq, freq));
+}
+
+void Processing::tunePrintHelper(bool isInTune, float freq, float targetFreq) {
+  if (isInTune) {
+    Serial.println("In Tune!");
+    return;
+  } else if ((freq - targetFreq) < 0.0f) {
+    Serial.println("Tune Up!");
+    return;
+  } else {
+    Serial.println("Tune Down!");
+    return;
+  }
+}
 
 float Processing::getMinHz(int strIdx) { return MIN_HZ[strIdx]; }
-
 float Processing::getMaxHz(int strIdx) { return MAX_HZ[strIdx]; }
