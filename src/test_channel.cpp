@@ -443,6 +443,236 @@ void loop() {
 
 #endif  // ACCURACY_TEST
 
+// -- MPM Accuracy Benchmark ----------------------------------------------------
+// Identical to the YIN Accuracy Benchmark above but uses the McLeod Pitch
+// Method (MPM / NSDF) algorithm instead.  Lets you compare the two algorithms
+// side-by-side on the same hardware.
+//
+// Per-pluck output:  #N  freq: XX.XX Hz  cents: +/-X.X
+// Summary:           avg cents, ±5c%, ±10c%
+//
+// Upload:  pio run -e teensy41_mpm_accuracy_lowe -t upload   (Low E)
+//          pio run -e teensy41_mpm_accuracy_a    -t upload   (A)
+//          pio run -e teensy41_mpm_accuracy_d    -t upload   (D)
+//          pio run -e teensy41_mpm_accuracy_g    -t upload   (G)
+//          pio run -e teensy41_mpm_accuracy_b    -t upload   (B)
+//          pio run -e teensy41_mpm_accuracy_hie  -t upload   (High E)
+// Monitor: pio device monitor
+
+#ifdef ACCURACY_MPM_TEST
+
+#include <Arduino.h>
+#include <IntervalTimer.h>
+#include <math.h>
+#include "ADCDriver.h"
+#include "Tuner.h"
+
+#if ACCURACY_MPM_TEST == 1
+static constexpr const char* LABEL     = "Low E";
+static constexpr float       TARGET_HZ = 82.41f;
+static constexpr float       GATE_MIN  = 50.0f;
+static constexpr float       GATE_MAX  = 90.0f;
+static constexpr uint8_t     ADC_CH    = 1;
+
+#elif ACCURACY_MPM_TEST == 2
+static constexpr const char* LABEL     = "A";
+static constexpr float       TARGET_HZ = 110.0f;
+static constexpr float       GATE_MIN  = 95.0f;
+static constexpr float       GATE_MAX  = 135.0f;
+static constexpr uint8_t     ADC_CH    = 2;
+
+#elif ACCURACY_MPM_TEST == 3
+static constexpr const char* LABEL     = "D";
+static constexpr float       TARGET_HZ = 146.83f;
+static constexpr float       GATE_MIN  = 120.0f;
+static constexpr float       GATE_MAX  = 200.0f;
+static constexpr uint8_t     ADC_CH    = 3;
+
+#elif ACCURACY_MPM_TEST == 4
+static constexpr const char* LABEL     = "G";
+static constexpr float       TARGET_HZ = 196.0f;
+static constexpr float       GATE_MIN  = 150.0f;
+static constexpr float       GATE_MAX  = 250.0f;
+static constexpr uint8_t     ADC_CH    = 4;
+
+#elif ACCURACY_MPM_TEST == 5
+static constexpr const char* LABEL     = "B";
+static constexpr float       TARGET_HZ = 246.94f;
+static constexpr float       GATE_MIN  = 200.0f;
+static constexpr float       GATE_MAX  = 300.0f;
+static constexpr uint8_t     ADC_CH    = 5;
+
+#elif ACCURACY_MPM_TEST == 6
+static constexpr const char* LABEL     = "High E";
+static constexpr float       TARGET_HZ = 329.63f;
+static constexpr float       GATE_MIN  = 300.0f;
+static constexpr float       GATE_MAX  = 400.0f;
+static constexpr uint8_t     ADC_CH    = 6;
+
+#else
+#error "ACCURACY_MPM_TEST must be 1-6 (1=Low E, 2=A, 3=D, 4=G, 5=B, 6=High E)"
+#endif
+
+static constexpr int MPM_TOTAL_PLUCKS = 100;
+static constexpr int MPM_MEDIAN_N     = 5;  // must match Processing::MEDIAN_FRAMES
+
+static Tuner         mpmTuner(LABEL);
+static ADCDriver     mpmAdc;
+static IntervalTimer mpmSampleTimer;
+
+static int     mpmPluckCount        = 0;
+static float   mpmCentsSum          = 0.0f;
+static int     mpmWithin5           = 0;
+static int     mpmWithin10          = 0;
+static bool    mpmTestDone          = false;
+static bool    mpmReported          = false;
+static int16_t mpmMinP2PSinceReport = INT16_MAX;
+static float   mpmFreqHistory[MPM_MEDIAN_N];
+static int     mpmHistCount = 0;
+
+// Insertion-sort median — mirrors Processing::medianFreq exactly
+static float mpmMedianOf(float* arr, int n) {
+  float s[MPM_MEDIAN_N];
+  for (int i = 0; i < n; i++) s[i] = arr[i];
+  for (int i = 1; i < n; i++) {
+    float key = s[i];
+    int   j   = i - 1;
+    while (j >= 0 && s[j] > key) {
+      s[j + 1] = s[j];
+      j--;
+    }
+    s[j + 1] = key;
+  }
+  return s[n / 2];
+}
+
+static void mpmSampleISR() {
+  mpmAdc.startConversion();
+  delayMicroseconds(5);
+  int16_t buf[ADC_CH];
+  mpmAdc.readChannels(buf, ADC_CH);
+  mpmTuner.addSample(buf[ADC_CH - 1]);
+}
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial && millis() < 2000) {
+  }
+
+  Serial.println("========================================");
+  Serial.print("  MPM Accuracy Benchmark: ");
+  Serial.println(LABEL);
+  Serial.print("  Target : ");
+  Serial.print(TARGET_HZ, 2);
+  Serial.print(" Hz  |  Gate: ");
+  Serial.print(GATE_MIN, 0);
+  Serial.print(" - ");
+  Serial.print(GATE_MAX, 0);
+  Serial.println(" Hz");
+  Serial.print("  Plucks : ");
+  Serial.println(MPM_TOTAL_PLUCKS);
+  Serial.print("  Pluck the ");
+  Serial.print(LABEL);
+  Serial.println(" string repeatedly.");
+  Serial.println("========================================\n");
+
+  mpmAdc.begin();
+  mpmSampleTimer.begin(mpmSampleISR, 62.5f);
+}
+
+void loop() {
+  if (mpmTestDone) return;
+  if (!mpmTuner.isReady()) return;
+  mpmSampleTimer.end();
+
+  int16_t p2p = mpmTuner.peakToPeak();
+
+  if (p2p <= 200) {
+    // Silence: fully reset
+    mpmReported          = false;
+    mpmMinP2PSinceReport = INT16_MAX;
+    mpmTuner.reset();
+    mpmSampleTimer.begin(mpmSampleISR, 62.5f);
+    return;
+  }
+
+  if (mpmReported) {
+    // Onset detection: watch for a new pluck while string decays
+    if (p2p < mpmMinP2PSinceReport) mpmMinP2PSinceReport = p2p;
+    if (p2p > mpmMinP2PSinceReport * 1.5f) {
+      mpmReported          = false;
+      mpmMinP2PSinceReport = INT16_MAX;
+    }
+    mpmTuner.reset();
+    mpmSampleTimer.begin(mpmSampleISR, 62.5f);
+    return;
+  }
+
+  // Attempt pitch detection — accumulate MPM_MEDIAN_N frames before reporting
+  mpmTuner.removeDC();
+  float freq = mpmTuner.detectPitchMPM(16000.0f);
+
+  if (freq >= GATE_MIN && freq <= GATE_MAX) {
+    mpmFreqHistory[mpmHistCount++] = freq;
+
+    if (mpmHistCount < MPM_MEDIAN_N) {
+      // Not enough frames yet — keep filling
+      mpmTuner.reset();
+      mpmSampleTimer.begin(mpmSampleISR, 62.5f);
+      return;
+    }
+
+    // Got MPM_MEDIAN_N valid readings — compute median and report
+    float stableFreq     = mpmMedianOf(mpmFreqHistory, MPM_MEDIAN_N);
+    mpmHistCount         = 0;
+    mpmReported          = true;
+    mpmMinP2PSinceReport = INT16_MAX;
+
+    float noteNumFloat = 69.0f + 12.0f * log2f(stableFreq / 440.0f);
+    int   noteNum      = (int)(noteNumFloat + 0.5f);
+    float cents        = (noteNumFloat - noteNum) * 100.0f;
+
+    mpmPluckCount++;
+    mpmCentsSum += cents;
+    if (fabsf(cents) <= 5.0f) mpmWithin5++;
+    if (fabsf(cents) <= 10.0f) mpmWithin10++;
+
+    Serial.print("#");
+    Serial.print(mpmPluckCount);
+    Serial.print("\tfreq: ");
+    Serial.print(stableFreq, 2);
+    Serial.print(" Hz\tcents: ");
+    if (cents >= 0.0f) Serial.print("+");
+    Serial.println(cents, 1);
+
+    if (mpmPluckCount >= MPM_TOTAL_PLUCKS) {
+      mpmTestDone = true;
+      mpmSampleTimer.end();
+      Serial.println();
+      Serial.println("========================================");
+      Serial.println("  RESULTS (MPM)");
+      Serial.println("========================================");
+      float avg = mpmCentsSum / MPM_TOTAL_PLUCKS;
+      Serial.print("  Avg cents off : ");
+      if (avg >= 0.0f) Serial.print("+");
+      Serial.println(avg, 2);
+      Serial.print("  Within \xB15c  : ");
+      Serial.print((mpmWithin5 * 100) / MPM_TOTAL_PLUCKS);
+      Serial.println("%");
+      Serial.print("  Within \xB110c : ");
+      Serial.print((mpmWithin10 * 100) / MPM_TOTAL_PLUCKS);
+      Serial.println("%");
+      Serial.println("========================================");
+      return;
+    }
+  }
+
+  mpmTuner.reset();
+  mpmSampleTimer.begin(mpmSampleISR, 62.5f);
+}
+
+#endif  // ACCURACY_MPM_TEST
+
 // -- Motor Manual Test ---------------------------------------------------------
 // Keyboard-controlled motor + optional auto-tune on pluck.  Designed to let
 // you deliberately detune a string with the motor, pluck it, then watch the

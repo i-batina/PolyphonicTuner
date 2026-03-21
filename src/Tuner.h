@@ -9,8 +9,11 @@
 
 class Tuner {
  private:
+  static constexpr float MPM_KEY_MAX_RATIO = 0.93f;  // McLeod pitch method key threshold
+
   int16_t       buffer[BUFFER_SIZE];
-  float         yinBuffer[BUFFER_SIZE / 2];
+  float         yinBuffer[BUFFER_SIZE / 2];   // YIN CMND working buffer
+  float         nsdfBuffer[BUFFER_SIZE / 2];  // MPM NSDF working buffer
   volatile int  writeIdx    = 0;
   volatile bool bufferReady = false;
 
@@ -25,6 +28,7 @@ class Tuner {
   Tuner(String stringName) : name(stringName) {
     memset(buffer, 0, sizeof(buffer));
     memset(yinBuffer, 0, sizeof(yinBuffer));
+    memset(nsdfBuffer, 0, sizeof(nsdfBuffer));
   }
 
   void addSample(int16_t sample);
@@ -38,7 +42,10 @@ class Tuner {
   // Check amplitude to ignore silence
   int16_t getMaxAmplitude();
 
-  // Calculates Hz from the buffer
+  // Calculates Hz from the buffer using YIN (default) or MPM (when USE_MPM is defined)
   float detectPitch(float sampleRate);
+
+  // McLeod Pitch Method — always available regardless of USE_MPM build flag
+  float detectPitchMPM(float sampleRate);
 };
 #endif

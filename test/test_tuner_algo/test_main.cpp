@@ -191,6 +191,83 @@ void test_median_single_element() {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 82.5f, med);
 }
 
+// ══ MPM Pitch Detection ═══════════════════════════════════════════════════════
+// Tests call detectPitchMPM() directly so they always run regardless
+// of whether -D USE_MPM is present in the build flags.
+
+void test_mpm_lowE_82hz() {
+  Tuner t("LowE_MPM");
+  fillSine(t, 82.41f, 20000.0f);
+  float hz = t.detectPitchMPM(FS);
+  Serial.print("[MPM LowE] detected=");
+  Serial.print(hz, 2);
+  Serial.println(" Hz  (expected ~82.41)");
+  TEST_ASSERT_FLOAT_WITHIN(3.0f, 82.41f, hz);
+}
+
+void test_mpm_lowE_sharp() {
+  Tuner t("LowE_sharp_MPM");
+  fillSine(t, 87.41f, 20000.0f);
+  float hz = t.detectPitchMPM(FS);
+  Serial.print("[MPM LowE+5Hz] detected=");
+  Serial.print(hz, 2);
+  Serial.println(" Hz  (expected ~87.41)");
+  TEST_ASSERT_FLOAT_WITHIN(3.0f, 87.41f, hz);
+}
+
+void test_mpm_lowE_flat() {
+  Tuner t("LowE_flat_MPM");
+  fillSine(t, 77.41f, 20000.0f);
+  float hz = t.detectPitchMPM(FS);
+  Serial.print("[MPM LowE-5Hz] detected=");
+  Serial.print(hz, 2);
+  Serial.println(" Hz  (expected ~77.41)");
+  TEST_ASSERT_FLOAT_WITHIN(3.0f, 77.41f, hz);
+}
+
+void test_mpm_A_110hz() {
+  Tuner t("A_MPM");
+  fillSine(t, 110.0f, 20000.0f);
+  float hz = t.detectPitchMPM(FS);
+  Serial.print("[MPM A] detected=");
+  Serial.print(hz, 2);
+  Serial.println(" Hz  (expected ~110.00)");
+  TEST_ASSERT_FLOAT_WITHIN(3.0f, 110.0f, hz);
+}
+
+void test_mpm_A_sharp() {
+  Tuner t("A_sharp_MPM");
+  fillSine(t, 115.0f, 20000.0f);
+  float hz = t.detectPitchMPM(FS);
+  Serial.print("[MPM A+5Hz] detected=");
+  Serial.print(hz, 2);
+  Serial.println(" Hz  (expected ~115.00)");
+  TEST_ASSERT_FLOAT_WITHIN(3.0f, 115.0f, hz);
+}
+
+void test_mpm_A_flat() {
+  Tuner t("A_flat_MPM");
+  fillSine(t, 105.0f, 20000.0f);
+  float hz = t.detectPitchMPM(FS);
+  Serial.print("[MPM A-5Hz] detected=");
+  Serial.print(hz, 2);
+  Serial.println(" Hz  (expected ~105.00)");
+  TEST_ASSERT_FLOAT_WITHIN(3.0f, 105.0f, hz);
+}
+
+// Octave guard: MPM must not return the 2nd harmonic (~164.82 Hz) instead of
+// the fundamental (82.41 Hz). The half-period NSDF peak sits well below the
+// key threshold on a pure sine, so the first qualifying peak should be correct.
+void test_mpm_octave_guard_lowE() {
+  Tuner t("LowE_octave_MPM");
+  fillSine(t, 82.41f, 20000.0f);
+  float hz = t.detectPitchMPM(FS);
+  Serial.print("[MPM octave guard] detected=");
+  Serial.print(hz, 2);
+  Serial.println(" Hz  (must be < 100 Hz, not ~164 Hz)");
+  TEST_ASSERT_LESS_THAN(100.0f, hz);
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
@@ -233,6 +310,15 @@ void setup() {
   RUN_TEST(test_median_known_values);
   RUN_TEST(test_median_sorted_input);
   RUN_TEST(test_median_single_element);
+
+  // MPM pitch detection (calls detectPitchMPM directly)
+  RUN_TEST(test_mpm_lowE_82hz);
+  RUN_TEST(test_mpm_lowE_sharp);
+  RUN_TEST(test_mpm_lowE_flat);
+  RUN_TEST(test_mpm_A_110hz);
+  RUN_TEST(test_mpm_A_sharp);
+  RUN_TEST(test_mpm_A_flat);
+  RUN_TEST(test_mpm_octave_guard_lowE);
 
   UNITY_END();
 }

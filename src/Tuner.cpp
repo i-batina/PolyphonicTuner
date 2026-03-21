@@ -56,6 +56,10 @@ int16_t Tuner::getMaxAmplitude() {
 }
 
 float Tuner::detectPitch(float sampleRate) {
+#ifdef USE_MPM
+  return detectPitchMPM(sampleRate);
+#endif
+
   // 1. Difference Function
   for (int tau = 0; tau < BUFFER_SIZE / 2; tau++) yinBuffer[tau] = 0;
 
@@ -124,4 +128,58 @@ float Tuner::detectPitch(float sampleRate) {
   }
 
   return 0.0;  // No pitch found
+}
+
+// -- McLeod Pitch Method (MPM) ----------------------------------------------
+float Tuner::detectPitchMPM(float sampleRate) {
+  // Zero the NSDF working buffer
+  for (int tau = 0; tau < BUFFER_SIZE / 2; tau++) nsdfBuffer[tau] = 0.0f;
+
+  // Step 1: Compute NSDF for each lag tau
+  // Inner loop length shrinks by tau to stay within the buffer.
+  for (int tau = 1; tau < BUFFER_SIZE / 2; tau++) {
+    float r = 0.0f, m = 0.0f;
+    int   n = BUFFER_SIZE / 2 - tau;
+    for (int j = 0; j < n; j++) {
+      float xj     = (float)buffer[j];
+      float xj_tau = (float)buffer[j + tau];
+      r += xj * xj_tau;
+      m += xj * xj + xj_tau * xj_tau;
+    }
+    nsdfBuffer[tau] = (m < 1e-6f) ? 0.0f : 2.0f * r / m;
+  }
+
+  // Step 2: Global maximum in the search range
+  // tau_min=35 mirrors YIN and covers up to ~457 Hz (well above High E = 329.63 Hz).
+  float globalMax = 0.0f;
+  for (int tau = 35; tau < BUFFER_SIZE / 2; tau++) {
+    if (nsdfBuffer[tau] > globalMax) globalMax = nsdfBuffer[tau];
+  }
+
+  if (globalMax <= 0.0f) return 0.0f;  // silent or flatline input
+
+  // Step 3: Key threshold
+  float keyThreshold = globalMax * MPM_KEY_MAX_RATIO;
+
+  // Step 4: Find the first local maximum above the key threshold
+  // Upper bound is BUFFER_SIZE/2-2 so that tau+1 is always a valid index.
+  int bestTau = -1;
+  for (int tau = 35; tau < BUFFER_SIZE / 2 - 1; tau++) {
+    if (nsdfBuffer[tau] >= keyThreshold && nsdfBuffer[tau] > nsdfBuffer[tau - 1] &&
+        nsdfBuffer[tau] >= nsdfBuffer[tau + 1]) {
+      bestTau = tau;
+      break;  // first (smallest tau) qualifying peak = highest plausible fundamental
+    }
+  }
+
+  if (bestTau < 0) return 0.0f;  // no qualifying peak found
+
+  // Step 5: Parabolic interpolation (same 3-point formula as detectPitch)
+  float y1         = nsdfBuffer[bestTau - 1];
+  float y2         = nsdfBuffer[bestTau];
+  float y3         = nsdfBuffer[bestTau + 1];
+  float denom      = 2.0f * (2.0f * y2 - y3 - y1);
+  float refinedTau = (denom != 0.0f) ? bestTau + (y3 - y1) / denom : (float)bestTau;
+
+  return sampleRate / refinedTau;
 }
