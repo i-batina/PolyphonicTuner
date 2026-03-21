@@ -14,6 +14,7 @@ Tuner         tunerG("G");
 Tuner         tunerB("B");
 Tuner         tunerHiE("High E");
 ADCDriver     adc;
+static Tuner* _tunerPtrs[6];
 IntervalTimer sampleTimer;
 MotorControl  motor;
 OledScript    oledScript;
@@ -102,8 +103,8 @@ float Processing::processString(Tuner& t, float minHz, float maxHz, float* histo
       histCount           = 0;
       reported            = true;
       t.minP2PSinceReport = INT16_MAX;  // begin tracking post-report minimum
-      printFun(label, stableFreq, targetFreq);
-      tunePrintHelper(fabs(stableFreq - targetFreq) < 1.0f, stableFreq, targetFreq);
+      // printFun(label, stableFreq, targetFreq);
+      // tunePrintHelper(fabs(stableFreq - targetFreq) < 1.0f, stableFreq, targetFreq);
       return stableFreq;
     }
   }
@@ -138,6 +139,12 @@ void Processing::setup() {
 
   motor.setup();
   adc.begin();
+  _tunerPtrs[0] = &tunerLowE;
+  _tunerPtrs[1] = &tunerA;
+  _tunerPtrs[2] = &tunerD;
+  _tunerPtrs[3] = &tunerG;
+  _tunerPtrs[4] = &tunerB;
+  _tunerPtrs[5] = &tunerHiE;
 
   // 16kHz => 62.5 us period
   sampleTimer.begin(sampleISR, 62.5);
@@ -150,61 +157,83 @@ void Processing::setup() {
 void Processing::loop() {
   oledScript.loop();
 
-  if (noneReady()) return;
-  sampleTimer.end();
+  bool active = UI::isTuningActive();
 
-  if (tunerLowE.isReady())
-    loopProcessHelper(
-        tunerLowE, 0, _freqHistoryLowE, _histCountLowE, _reportedLowE, "Low E", 82.41f);
-
-  if (tunerA.isReady())
-    loopProcessHelper(tunerA, 1, _freqHistoryA, _histCountA, _reportedA, "A", 110.0f);
-
-  if (tunerD.isReady())
-    loopProcessHelper(tunerD, 2, _freqHistoryD, _histCountD, _reportedD, "D", 146.8f);
-
-  if (tunerG.isReady())
-    loopProcessHelper(tunerG, 3, _freqHistoryG, _histCountG, _reportedG, "G", 196.0f);
-
-  if (tunerB.isReady()) {
-    loopProcessHelper(tunerB, 4, _freqHistoryB, _histCountB, _reportedB, "B", 246.9f);
+  if (!active) {
+    if (_tuningWasActive) {
+      // user backed out, reset all per-string state
+      for (int i = 0; i < 6; i++) {
+        _histCount[i] = 0;
+        _reported[i]  = false;
+        _tunerPtrs[i]->reset();
+        memset(_freqHistory[i], 0, sizeof(_freqHistory[i]));
+      }
+      _currentStringIdx = 0;
+      _tuningWasActive  = false;
+      motor.stopAllMotors();
+    }
+    return;
   }
 
-  if (tunerHiE.isReady())
-    loopProcessHelper(tunerHiE, 5, _freqHistoryHiE, _histCountHiE, _reportedHiE, "High E", 329.6f);
+  if (!_tuningWasActive) {
+    // first frame after "Start" pressed, show pluck prompt for string 0
+    _tuningWasActive = true;
+    int tuningIdx    = UI::getSelectedTuningIndex();
+    UI::showPluckPrompt(
+        STR_ORDINALS[0], STR_LABELS[0], _tunings[tuningIdx].notes[0], _tunings[tuningIdx].freqs[0]);
+    return;
+  }
 
+  if (_currentStringIdx >= 6) return;  // all done, ui shows SCREEN_ALL_TUNED
+
+  int    i         = _currentStringIdx;
+  int    tuningIdx = UI::getSelectedTuningIndex();
+  float  targetHz  = _tunings[tuningIdx].freqs[i];
+  Tuner* t         = _tunerPtrs[i];
+
+  float freq = processString(*t, getMinHz(i), getMaxHz(i), _freqHistory[i], _histCount[i],
+      _reported[i], STR_LABELS[i], targetHz);
+
+  if (freq > 0.0f) {
+    String curNote = getNoteName(freq);
+    String tgtNote = getNoteName(targetHz);
+    UI::setTuningDisplay(curNote.c_str(), tgtNote.c_str(), STR_LABELS[i], freq > targetHz);
+    UI::showTuningScreen();
+
+    float cents    = getCentsOffTarget(targetHz, freq);
+    float absCents = fabsf(cents);
+
+    if (absCents < 4.0f) {
+      // In tune, brief display of tuning screen, then advance
+      delay(600);
+      _currentStringIdx++;
+      if (_currentStringIdx >= 6) {
+        UI::signalAllTuned();
+      } else {
+        int ni = _currentStringIdx;
+        UI::showPluckPrompt(STR_ORDINALS[ni], STR_LABELS[ni], _tunings[tuningIdx].notes[ni],
+            _tunings[tuningIdx].freqs[ni]);
+      }
+    } else {
+      float norm   = constrain((absCents - 2.0f) / (CENTS_MAX_CLAMP - 2.0f), 0.0f, 1.0f);
+      int   spinMs = MIN_SPINS_MS + (int)(norm * (MAX_SPINS_MS - MIN_SPINS_MS));
+      motor.tune(targetHz, freq, i);
+      delay(spinMs);  // brief delay to allow motor response before processing next string
+      motor.stopAllMotors();
+      delay(600);  // wait for string to stop vibrating from motor before next pitch read
+
+      _reported[i]  = false;  // allow fresh pitch reading w/o re plucking
+      _histCount[i] = 0;      // reset median history for fresh reading
+      // Go back to pluck prompt state for same string
+      UI::showPluckPrompt(STR_ORDINALS[i], STR_LABELS[i], STR_LABELS[i], targetHz);
+    }
+  }
+
+  t->reset();
   sampleTimer.begin(sampleISR, 62.5);
 }
 
 // Helpers
-void Processing::loopProcessHelper(Tuner& tuner, int strIdx, float* freqHistory, int& histCount,
-    bool& reported, const char* label, float targetFreq) {
-  float freq = processString(tuner, getMinHz(strIdx), getMaxHz(strIdx), freqHistory, histCount,
-      reported, label, targetFreq);
-  if (freq > 0.0f) {
-    // Update OLED tuning screen with live pitch data
-    String currentNoteStr = getNoteName(freq);
-    String targetNoteStr  = getNoteName(targetFreq);
-    UI::setTuningDisplay(currentNoteStr.c_str(), targetNoteStr.c_str(), label, freq > targetFreq);
-
-    float absCents = fabsf(getCentsOffTarget(targetFreq, freq));
-    float t        = constrain((absCents - 2.0f) / (CENTS_MAX_CLAMP - 2.0f), 0.0f, 1.0f);
-    int   spinMs   = MIN_SPINS_MS + (int)(t * (MAX_SPINS_MS - MIN_SPINS_MS));
-
-    motor.tune(targetFreq, freq, strIdx);
-    delay(spinMs);  // brief delay to allow motor response before processing next string
-    motor.stopAllMotors();
-    delay(600);         // wait for string to stop vibrating from motor
-    reported  = false;  // allow fresh pitch reading w/o re plucking
-    histCount = 0;      // reset median history for fresh reading
-  }
-  tuner.reset();
-}
-
-bool Processing::noneReady() {
-  return !tunerLowE.isReady() && !tunerA.isReady() && !tunerD.isReady() && !tunerG.isReady() &&
-         !tunerB.isReady() && !tunerHiE.isReady();
-}
 void Processing::printFun(const char* label, float freq, float targetFreq) {
   Serial.print("[");
   Serial.print(label);

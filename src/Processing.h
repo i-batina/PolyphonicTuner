@@ -11,47 +11,6 @@ struct Tuning {
 };
 
 class Processing {
- private:
-  static constexpr float SAMPLE_RATE = 16000.0f;
-
-  // E, A, D, G, B, e frequency ranges (Hz) for pitch detection gate
-  static constexpr float MIN_HZ[6] = {50.0f, 95.0f, 125.0f, 165.0f, 215.0f, 280.0f};
-  static constexpr float MAX_HZ[6] = {90.0f, 120.0f, 160.0f, 210.0f, 260.0f, 360.0f};
-
-  static constexpr int   MIN_SPINS_MS    = 60;     // spin time when just outside deadband, in ms
-  static constexpr int   MAX_SPINS_MS    = 600;    // spin time when well outside deadband, in ms
-  static constexpr float CENTS_MAX_CLAMP = 50.0f;  // cents at which spin is capped at MAX_SPINS_MS
-
-  // Frequency gates per string wide enough to cover standard and common alternate tunings
-  // open E (82.41 Hz)
-  // open A 5th string (A2=110 Hz)
-  // open-D 4th string (D3=146.8 Hz)
-  // open-G 3rd string (G3=196.0 Hz)
-  // open-B 2nd string (B3=246.9 Hz)
-  // open E 1st string (E4=329.6 Hz)
-  static constexpr int MEDIAN_FRAMES = 5;
-
-  inline static float _freqHistoryLowE[MEDIAN_FRAMES] = {};
-  inline static float _freqHistoryA[MEDIAN_FRAMES]    = {};
-  inline static float _freqHistoryD[MEDIAN_FRAMES]    = {};
-  inline static float _freqHistoryG[MEDIAN_FRAMES]    = {};
-  inline static float _freqHistoryB[MEDIAN_FRAMES]    = {};
-  inline static float _freqHistoryHiE[MEDIAN_FRAMES]  = {};
-
-  inline static int _histCountLowE = 0;
-  inline static int _histCountA    = 0;
-  inline static int _histCountD    = 0;
-  inline static int _histCountG    = 0;
-  inline static int _histCountB    = 0;
-  inline static int _histCountHiE  = 0;
-
-  inline static bool _reportedLowE = false;
-  inline static bool _reportedA    = false;
-  inline static bool _reportedD    = false;
-  inline static bool _reportedG    = false;
-  inline static bool _reportedB    = false;
-  inline static bool _reportedHiE  = false;
-
  public:
   static String getNoteName(float freq);
 
@@ -77,25 +36,51 @@ class Processing {
   static void loop();
 
   // Helpers
-  static void  loopProcessHelper(Tuner& tuner, int strIdx, float* freqHistory, int& histCount,
-       bool& reported, const char* label, float targetFreq);
-  static bool  noneReady();
+  // static void  loopProcessHelper(Tuner& tuner, int strIdx, float* freqHistory, int& histCount,
+  //     bool& reported, const char* label, float targetFreq);
+  // static bool  noneReady();
   static void  tunePrintHelper(bool isInTune, float targetFreq, float freq);
   static float getMinHz(int strIdx);
   static float getMaxHz(int strIdx);
 
  private:
-  // Array of note names
+  static constexpr float SAMPLE_RATE     = 16000.0f;
+  static constexpr int   MEDIAN_FRAMES   = 5;
+  static constexpr int   MIN_SPINS_MS    = 60;
+  static constexpr int   MAX_SPINS_MS    = 600;
+  static constexpr float CENTS_MAX_CLAMP = 50.0f;
+
+  // Frequency gates — wide enough to cover all four alternate tunings
+  static constexpr float MIN_HZ[6] = {50.0f, 95.0f, 125.0f, 165.0f, 215.0f, 280.0f};
+  static constexpr float MAX_HZ[6] = {90.0f, 120.0f, 160.0f, 210.0f, 260.0f, 360.0f};
+
+  // String labels and ordinal names (index 0 = Low E = 6th string)
+  static constexpr const char* STR_LABELS[6]   = {"Low E", "A", "D", "G", "B", "High E"};
+  static constexpr const char* STR_ORDINALS[6] = {"6th", "5th", "4th", "3rd", "2nd", "1st"};
+
+  // Per-string pitch-detection state (arrays replace the old per-name fields)
+  inline static float _freqHistory[6][MEDIAN_FRAMES] = {};
+  inline static int   _histCount[6]                  = {};
+  inline static bool  _reported[6]                   = {};
+
+  // Sequential tuning state
+  inline static int  _currentStringIdx = 0;
+  inline static bool _tuningWasActive  = false;
+
+  // Alternate tunings (Standard, Drop D, Open G, Open D)
+  static constexpr Tuning _tunings[] = {
+      {"Standard", {"E", "A", "D", "G", "B", "e"},
+          {82.41f, 110.0f, 146.83f, 196.0f, 246.94f, 329.63f}},
+      {"Drop D", {"D", "A", "D", "G", "B", "e"},
+          {73.42f, 110.0f, 146.83f, 196.0f, 246.94f, 329.63f}},
+      {"Open G", {"D", "G", "D", "G", "B", "D"},
+          {73.42f, 98.0f, 146.83f, 196.0f, 246.94f, 293.66f}},
+      {"Open D", {"D", "A", "D", "F#", "A", "D"},
+          {73.42f, 110.0f, 146.83f, 185.0f, 220.0f, 293.66f}},
+  };
+
   static constexpr const char* _noteNames[12] = {
       "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-
-  // Alternate tunings
-  static constexpr Tuning _tunings[] = {{"Standard", {"E", "A", "D", "G", "B", "e"},
-                                            {82.41f, 110.0f, 146.8f, 196.0f, 246.9f, 329.6f}},
-      {"Drop D", {"D", "A", "D", "G", "B", "e"}, {73.42f, 110.0f, 146.8f, 196.0f, 246.9f, 329.6f}},
-      {"Open G", {"D", "G", "D", "G", "B", "D"}, {73.42f, 98.0f, 146.8f, 196.0f, 246.9f, 146.8f}},
-      {"Open D", {"D", "A", "D", "F#", "A", "D"},
-          {73.42f, 110.0f, 146.8f, 185.0f, 110.0f, 73.42f}}};
 };
 
 #endif  // PROCESSING_H

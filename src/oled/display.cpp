@@ -35,59 +35,63 @@ void Display::drawHomeScreen(int selectedIndex) {
   u8g2.sendBuffer();
 }
 
-void Display::drawSelectTuningScreen(
-    int selectedIndex, const char* note, const char* type, bool isEditingField) {
+void Display::drawSelectTuningScreen(int selectedIndex) {
+  static constexpr const char* TUNING_NAMES[4] = {
+      "Standard  E A D G B e",
+      "Drop D    D A D G B e",
+      "Open G    D G D G B D",
+      "Open D    D A D F#A D",
+  };
+
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tr);
+  u8g2.drawStr(0, 10, "Select Tuning:");
+
+  for (int i = 0; i < 4; i++) {
+    int y = 22 + i * 12;
+    if (i == selectedIndex) {
+      u8g2.drawBox(0, y - 9, 128, 11);
+      u8g2.setDrawColor(0);
+      u8g2.drawStr(2, y, TUNING_NAMES[i]);
+      u8g2.setDrawColor(1);
+    } else {
+      u8g2.drawStr(2, y, TUNING_NAMES[i]);
+    }
+  }
+  u8g2.sendBuffer();
+}
+
+void Display::drawPluckPromptScreen(
+    const char* ordinal, const char* strLabel, const char* noteName, float targetHz) {
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tr);
+  u8g2.drawStr(0, 10, "Pluck string:");
+
+  // Large string label, e.g. 4th - D
+  u8g2.setFont(u8g2_font_7x14_tr);
+  char line[32];
+  snprintf(line, sizeof(line), "%s  %s", ordinal, strLabel);
+  u8g2.drawStr(0, 32, line);
+
+  // Target note and Hz in small font
+  u8g2.setFont(u8g2_font_6x10_tr);
+  char hz[24];
+  snprintf(hz, sizeof(hz), "Target: %s  %.1f Hz", noteName, targetHz);
+  u8g2.drawStr(0, 50, hz);
+
+  // Blinking arrow to indicate waiting
+  if ((millis() / 500) % 2 == 0) u8g2.drawStr(110, 50, "<<");
+
+  u8g2.sendBuffer();
+}
+
+void Display::drawAllTunedScreen() {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_7x14_tr);
-
-  const int rowY[3] = {15, 35, 55};
-
-  // Start
-  if (selectedIndex == 0 && !isEditingField) {
-    u8g2.drawBox(0, 2, 128, 16);
-    u8g2.setDrawColor(0);
-    u8g2.drawStr(5, rowY[0], "Start");
-    u8g2.setDrawColor(1);
-  } else {
-    u8g2.drawStr(5, rowY[0], "Start");
-  }
-
-  // Note row
-  if (selectedIndex == 1 && !isEditingField) {
-    u8g2.drawBox(0, 22, 128, 16);
-    u8g2.setDrawColor(0);
-    u8g2.drawStr(5, rowY[1], "Note:");
-    u8g2.drawStr(70, rowY[1], note);
-    u8g2.setDrawColor(1);
-  } else {
-    u8g2.drawStr(5, rowY[1], "Note:");
-    bool showNote = true;
-    if (selectedIndex == 1 && isEditingField) {
-      showNote = ((millis() / 250) % 2) == 0;
-    }
-    if (showNote) {
-      u8g2.drawStr(70, rowY[1], note);
-    }
-  }
-
-  // Type row
-  if (selectedIndex == 2 && !isEditingField) {
-    u8g2.drawBox(0, 42, 128, 16);
-    u8g2.setDrawColor(0);
-    u8g2.drawStr(5, rowY[2], "Type:");
-    u8g2.drawStr(70, rowY[2], type);
-    u8g2.setDrawColor(1);
-  } else {
-    u8g2.drawStr(5, rowY[2], "Type:");
-    bool showType = true;
-    if (selectedIndex == 2 && isEditingField) {
-      showType = ((millis() / 250) % 2) == 0;
-    }
-    if (showType) {
-      u8g2.drawStr(70, rowY[2], type);
-    }
-  }
-
+  u8g2.drawStr(14, 22, "All strings");
+  u8g2.drawStr(26, 40, "in tune!");
+  u8g2.setFont(u8g2_font_6x10_tr);
+  u8g2.drawStr(20, 58, "Press back/select");
   u8g2.sendBuffer();
 }
 

@@ -1,7 +1,14 @@
 #ifndef UI_H
 #define UI_H
 
-enum UIState { SCREEN_HOME, SCREEN_SELECT_TUNING, SCREEN_SETTINGS, SCREEN_TUNING };
+enum UIState {
+  SCREEN_HOME,
+  SCREEN_SELECT_TUNING,
+  SCREEN_SETTINGS,
+  SCREEN_TUNING,
+  SCREEN_PLUCK_PROMPT,
+  SCREEN_ALL_TUNED
+};
 
 class UI {
  public:
@@ -12,40 +19,37 @@ class UI {
   void handleBack();
   void renderCurrentScreen();
 
-  // For Reading Inputs
-  const char* getSelectedNote();
-  const char* getSelectedType();
-  int         getSelectedNoteIndex();
-  int         getSelectedTypeIndex();
+  // --- Static accessors used by Processing ---
+  static bool isTuningActive();
+  static int  getSelectedTuningIndex();  // 0=Standard,1=Drop D,2=Open G,3=Open D
 
-  bool isTuningActive();
-  void stopTuning();
+  // Called by Processing to drive UI state during the tuning workflow
+  static void showPluckPrompt(
+      const char* ordinal, const char* strLabel, const char* noteName, float targetHz);
+  static void showTuningScreen();
+  static void signalAllTuned();
+  static void stopTuning();
 
-  // Called by Processing when a stable pitch is detected, to update the tuning screen
+  // Called by Processing when a stable pitch is detected (updates tuning screen data)
   static void setTuningDisplay(
       const char* current, const char* target, const char* strName, bool isSharp);
 
  private:
-  static inline bool tuningActive   = false;  // Boolean to control if tuning should be happening
-  static inline int  selectedIndex  = 0;
-  static inline bool isEditingField = false;  // For Tuning Select Screen
+  static inline bool tuningActive       = false;
+  static inline int  selectedIndex      = 0;
+  static inline int  _selectedTuningIdx = 0;  // 0–3
 
-  static inline const char* noteOptions[] = {"E", "Eb", "D", "Db", "C", "B", "Bb", "A"};
-  static inline int         NOTE_COUNT    = sizeof(noteOptions) / sizeof(noteOptions[0]);
-
-  static inline const char* typeOptions[] = {"Standard", "Drop"};
-  static inline int         TYPE_COUNT    = sizeof(typeOptions) / sizeof(typeOptions[0]);
-
-  // static const bool sharp; //Boolean to control if note should display as tuning up or down
-
-  static inline int selectedNoteIndex = 0;  // For Tuning Select Screen
-  static inline int selectedTypeIndex = 0;  // For Tuning Select Screen
-
-  // Live data shown on the tuning screen
+  // Data for SCREEN_TUNING
   static inline char _currentNote[16]   = "---";
   static inline char _targetNote[16]    = "---";
   static inline char _currentString[16] = "---";
   static inline bool _sharp             = false;
+
+  // Data for SCREEN_PLUCK_PROMPT
+  static inline char  _pluckOrdinal[8]   = "1st";
+  static inline char  _pluckStrLabel[16] = "Low E";
+  static inline char  _pluckNoteName[8]  = "E";
+  static inline float _pluckTargetHz     = 82.41f;
 };
 
 #endif  // UI_H

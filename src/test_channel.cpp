@@ -1084,3 +1084,374 @@ void loop() {
 }
 
 #endif  // MOTOR_MANUAL_TEST
+
+// 6-String Auto-Tuner w/ Alternate Tuning Selection
+// Upload:  pio run -e teensy41_manual_all -t upload
+// Monitor: pio device monitor
+// Serial commands:
+//   a       toggle auto-tune (ON by default)
+//   t       show tuning menu; then type 1-4 to switch tuning
+//   p       print status
+//   h / ?   print this help
+//   SPACE / x   STOP ALL MOTORS (emergency kill)
+
+#ifdef MOTOR_MANUAL_ALL
+
+#include <Arduino.h>
+#include <IntervalTimer.h>
+#include "ADCDriver.h"
+#include "MotorControl.h"
+#include "Processing.h"
+#include "Tuner.h"
+
+// Tuning table (mirrors Processing::_tunings[])
+struct ManualAllTuning {
+  const char* name;
+  const char* notes[6];
+  float       freqs[6];
+};
+
+static constexpr ManualAllTuning TUNINGS[] = {
+    {"Standard", {"E", "A", "D", "G", "B", "E"},
+        {82.41f, 110.0f, 146.83f, 196.0f, 246.94f, 329.63f}},
+    {"Drop D", {"D", "A", "D", "G", "B", "E"}, {73.42f, 110.0f, 146.83f, 196.0f, 246.94f, 329.63f}},
+    {"Open G", {"D", "G", "D", "G", "B", "D"},
+        {73.42f, 98.00f, 146.83f, 196.0f, 246.94f, 73.42f * 2}},
+    {"Open D", {"D", "A", "D", "F#", "A", "D"},
+        {73.42f, 110.0f, 146.83f, 185.0f, 110.0f * 2, 73.42f * 2}},
+};
+
+static constexpr int NUM_TUNINGS = sizeof(TUNINGS) / sizeof(TUNINGS[0]);
+
+// Per-string frequency gates (wide enough to cover all tunings above)
+
+static constexpr float GATE_MIN[6] = {50.0f, 85.0f, 125.0f, 165.0f, 200.0f, 270.0f};
+static constexpr float GATE_MAX[6] = {100.0f, 135.0f, 200.0f, 250.0f, 295.0f, 370.0f};
+
+static constexpr const char* STRING_LABELS[6] = {"Low E", "A", "D", "G", "B", "High E"};
+
+// Auto tune timing (mirrors Processing::loopProcessHelper)
+static constexpr float CENTS_MAX_CLAMP = 50.0f;
+static constexpr int   MIN_SPINS_MS    = 60;
+static constexpr int   MAX_SPINS_MS    = 600;
+static constexpr int   SETTLE_MS       = 600;
+
+// Pitch detection
+static constexpr int MEDIAN_N = 5;
+
+// Per string onset/median state
+struct StrState {
+  float   freqHist[MEDIAN_N];
+  int     histCount;
+  bool    reported;
+  int16_t minP2PSinceReport;
+  float   lastFreq;
+};
+static StrState ss[6];
+
+// Global mode state
+static int  activeTuning          = 0;
+static bool autoTune              = true;
+static bool waitingForTuningInput = false;
+
+// Hardware
+// Declared individually (same style as Processing.cpp) then collected into a
+// pointer array for indexed access in the loop.
+static Tuner  tunerLowE("Low E"), tunerA("A"), tunerD("D");
+static Tuner  tunerG("G"), tunerB("B"), tunerHiE("High E");
+static Tuner* tuners[6] = {&tunerLowE, &tunerA, &tunerD, &tunerG, &tunerB, &tunerHiE};
+
+static ADCDriver     adc;
+static MotorControl  motor;
+static IntervalTimer sampleTimer;
+
+// -- ISR: 16 kHz (channel mapping mirrors Processing::sampleISR) ------------
+static void sampleISR() {
+  adc.startConversion();
+  delayMicroseconds(5);
+  int16_t buf[6];
+  adc.readChannels(buf, 6);
+  tunerLowE.addSample(buf[0]);
+  tunerA.addSample(buf[2]);  // note: A is buf[2], D is buf[1]
+  tunerD.addSample(buf[1]);
+  tunerG.addSample(buf[3]);
+  tunerB.addSample(buf[4]);
+  tunerHiE.addSample(buf[5]);
+}
+
+static void startTimer() { sampleTimer.begin(sampleISR, 62.5f); }
+static void stopTimer() { sampleTimer.end(); }
+
+// Polls Serial every ms so SPACE/x cuts a motor run immediately.
+// Returns true if a stop key was received.
+static bool safeDelay(unsigned long ms) {
+  unsigned long t0 = millis();
+  while (millis() - t0 < ms) {
+    if (Serial.available()) {
+      char c = (char)Serial.read();
+      if (c == ' ' || c == 'x') return true;
+    }
+  }
+  return false;
+}
+
+static float medianOfN(float* arr) {
+  float s[MEDIAN_N];
+  for (int i = 0; i < MEDIAN_N; i++) s[i] = arr[i];
+  for (int i = 1; i < MEDIAN_N; i++) {
+    float k = s[i];
+    int   j = i - 1;
+    while (j >= 0 && s[j] > k) {
+      s[j + 1] = s[j];
+      j--;
+    }
+    s[j + 1] = k;
+  }
+  return s[MEDIAN_N / 2];
+}
+
+static void resetAllStringState() {
+  for (int i = 0; i < 6; i++) {
+    ss[i].histCount         = 0;
+    ss[i].reported          = false;
+    ss[i].minP2PSinceReport = INT16_MAX;
+  }
+}
+
+// -- Serial UI --------------------------------------------------------------
+static void printHelp() {
+  Serial.println(F("================================================"));
+  Serial.println(F("  MOTOR MANUAL ALL — 6-string auto-tuner"));
+  Serial.println(F("================================================"));
+  Serial.println(F("  a         toggle auto-tune (ON by default)"));
+  Serial.println(F("  t         show tuning menu, then type 1-4"));
+  Serial.println(F("  p         print status"));
+  Serial.println(F("  h / ?     print this help"));
+  Serial.println(F("  SPACE/x   STOP ALL MOTORS (emergency kill)"));
+  Serial.println(F("================================================"));
+  Serial.println(F("  Pluck any string — it is detected automatically,"));
+  Serial.println(F("  tuned to the selected tuning, then waits."));
+  Serial.println(F("================================================"));
+}
+
+static void printTuningMenu() {
+  Serial.println(F("-- Select tuning (type number) --"));
+  for (int i = 0; i < NUM_TUNINGS; i++) {
+    Serial.print(i == activeTuning ? F("* ") : F("  "));
+    Serial.print(i + 1);
+    Serial.print(F(": "));
+    Serial.print(TUNINGS[i].name);
+    Serial.print(F("  ["));
+    for (int s = 0; s < 6; s++) {
+      Serial.print(TUNINGS[i].notes[s]);
+      if (s < 5) Serial.print('/');
+    }
+    Serial.println(F("]"));
+  }
+  waitingForTuningInput = true;
+}
+
+static void printStatus() {
+  Serial.print(F("[STATUS]  tuning="));
+  Serial.print(TUNINGS[activeTuning].name);
+  Serial.print(F("  auto-tune="));
+  Serial.println(autoTune ? F("ON") : F("OFF"));
+  for (int i = 0; i < 6; i++) {
+    Serial.print(F("  "));
+    Serial.print(STRING_LABELS[i]);
+    Serial.print(F(": target="));
+    Serial.print(TUNINGS[activeTuning].freqs[i], 2);
+    Serial.print(F(" Hz ("));
+    Serial.print(TUNINGS[activeTuning].notes[i]);
+    Serial.print(F(")"));
+    if (ss[i].lastFreq > 20.0f) {
+      float cents = Processing::getCentsOffTarget(TUNINGS[activeTuning].freqs[i], ss[i].lastFreq);
+      Serial.print(F("  last="));
+      Serial.print(ss[i].lastFreq, 2);
+      Serial.print(F(" Hz ("));
+      if (cents >= 0.0f) Serial.print('+');
+      Serial.print(cents, 1);
+      Serial.print(F(" c)"));
+    }
+    Serial.println();
+  }
+}
+
+static void handleSerial() {
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+
+    // Tuning selection mode: only digits and stop keys are meaningful.
+    if (waitingForTuningInput) {
+      if (c >= '1' && c <= '0' + NUM_TUNINGS) {
+        activeTuning          = c - '1';
+        waitingForTuningInput = false;
+        resetAllStringState();
+        Serial.print(F(">> Tuning set to: "));
+        Serial.println(TUNINGS[activeTuning].name);
+      } else if (c == ' ' || c == 'x') {
+        waitingForTuningInput = false;
+        motor.stopAllMotors();
+        Serial.println(F("!! STOP — tuning select cancelled, all motors halted"));
+      }
+      // ignore anything else (newlines, other keys)
+      continue;
+    }
+
+    switch (c) {
+      case 'a':
+        autoTune = !autoTune;
+        Serial.print(F(">> Auto-tune "));
+        Serial.println(autoTune ? F("ENABLED") : F("DISABLED"));
+        break;
+      case 't':
+        printTuningMenu();
+        break;
+      case 'p':
+        printStatus();
+        break;
+      case 'h':
+      case '?':
+        printHelp();
+        break;
+      case ' ':
+      case 'x':
+        motor.stopAllMotors();
+        Serial.println(F("!! STOP — all motors halted"));
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+// -- setup / loop -----------------------------------------------------------
+void setup() {
+  Serial.begin(115200);
+  while (!Serial && millis() < 2000) {
+  }
+
+  resetAllStringState();
+  for (int i = 0; i < 6; i++) ss[i].lastFreq = 0.0f;
+
+  adc.begin();
+  motor.setup();
+  startTimer();
+
+  Serial.println(F("================================================"));
+  Serial.println(F("  6-String Auto-Tuner — all strings"));
+  Serial.println(F("================================================"));
+  printHelp();
+  printTuningMenu();  // prompt for tuning on startup
+}
+
+void loop() {
+  handleSerial();
+  if (waitingForTuningInput) return;  // hold off detection until tuning is chosen
+
+  bool anyReady = false;
+  for (int i = 0; i < 6; i++)
+    if (tuners[i]->isReady()) {
+      anyReady = true;
+      break;
+    }
+  if (!anyReady) return;
+
+  stopTimer();
+
+  for (int i = 0; i < 6; i++) {
+    if (!tuners[i]->isReady()) continue;
+
+    int16_t   p2p = tuners[i]->peakToPeak();
+    StrState& s   = ss[i];
+
+    if (p2p <= 200) {
+      s.histCount         = 0;
+      s.reported          = false;
+      s.minP2PSinceReport = INT16_MAX;
+      tuners[i]->reset();
+      continue;
+    }
+
+    // Onset re-detection: same logic as MOTOR_MANUAL_TEST / Processing
+    if (s.reported) {
+      if (p2p < s.minP2PSinceReport) s.minP2PSinceReport = p2p;
+      if (p2p > s.minP2PSinceReport * 1.5f) {
+        s.histCount         = 0;
+        s.reported          = false;
+        s.minP2PSinceReport = INT16_MAX;
+      }
+      tuners[i]->reset();
+      continue;
+    }
+
+    tuners[i]->removeDC();
+    float freq = tuners[i]->detectPitch(16000.0f);
+    float tgt  = TUNINGS[activeTuning].freqs[i];
+
+    if (freq > GATE_MIN[i] && freq < GATE_MAX[i]) {
+      s.freqHist[s.histCount++] = freq;
+
+      if (s.histCount >= MEDIAN_N) {
+        float stable        = medianOfN(s.freqHist);
+        s.histCount         = 0;
+        s.reported          = true;
+        s.minP2PSinceReport = INT16_MAX;
+        s.lastFreq          = stable;
+
+        float cents    = Processing::getCentsOffTarget(tgt, stable);
+        float absCents = fabsf(cents);
+
+        Serial.print(F("[PLUCK]  "));
+        Serial.print(STRING_LABELS[i]);
+        Serial.print(F("  "));
+        Serial.print(stable, 2);
+        Serial.print(F(" Hz  "));
+        Serial.print(Processing::getNoteName(stable));
+        Serial.print(F("  |  "));
+        if (cents >= 0.0f) Serial.print('+');
+        Serial.print(cents, 1);
+        Serial.print(F(" c  -> target "));
+        Serial.print(tgt, 2);
+        Serial.print(F(" Hz ("));
+        Serial.print(TUNINGS[activeTuning].notes[i]);
+        Serial.print(')');
+
+        if (autoTune) {
+          if (absCents <= 4.0f) {
+            Serial.println(F("  IN TUNE"));
+          } else {
+            float t      = constrain((absCents - 2.0f) / (CENTS_MAX_CLAMP - 2.0f), 0.0f, 1.0f);
+            int   spinMs = MIN_SPINS_MS + (int)(t * (MAX_SPINS_MS - MIN_SPINS_MS));
+            Serial.print(F("  AUTO-TUNING ("));
+            Serial.print(cents > 0.0f ? F("tune down") : F("tune up"));
+            Serial.print(F(", "));
+            Serial.print(spinMs);
+            Serial.println(F(" ms)"));
+
+            motor.tune(tgt, stable, i);
+            bool estop = safeDelay(spinMs);
+            motor.stopAllMotors();
+            if (estop) {
+              Serial.println(F("!! STOP -- motor halted mid-tune"));
+            } else {
+              safeDelay(SETTLE_MS);
+            }
+            // Allow fresh reading after motor settles without re-plucking
+            s.reported  = false;
+            s.histCount = 0;
+          }
+        } else {
+          if (absCents <= 4.0f)
+            Serial.println(F("  (in tune)"));
+          else
+            Serial.println(cents > 0.0f ? F("  (needs DOWN)") : F("  (needs UP)"));
+        }
+      }
+    }
+    tuners[i]->reset();
+  }
+
+  startTimer();
+}
+#endif  // MOTOR_MANUAL_ALL
