@@ -1,6 +1,8 @@
 #include "Processing.h"
 #include "ADCDriver.h"
 #include "MotorControl.h"
+#include "oled/OledScript.h"
+#include "oled/ui.h"
 
 #include <IntervalTimer.h>
 #include <math.h>
@@ -14,6 +16,7 @@ Tuner         tunerHiE("High E");
 ADCDriver     adc;
 IntervalTimer sampleTimer;
 MotorControl  motor;
+OledScript    oledScript;
 
 String Processing::getNoteName(float freq) {
   // Handle silence/noise
@@ -139,10 +142,14 @@ void Processing::setup() {
   // 16kHz => 62.5 us period
   sampleTimer.begin(sampleISR, 62.5);
 
+  oledScript.setup();
+
   Serial.println("SAMPLING STARTED");
 }
 
 void Processing::loop() {
+  oledScript.loop();
+
   if (noneReady()) return;
   sampleTimer.end();
 
@@ -175,11 +182,16 @@ void Processing::loopProcessHelper(Tuner& tuner, int strIdx, float* freqHistory,
   float freq = processString(tuner, getMinHz(strIdx), getMaxHz(strIdx), freqHistory, histCount,
       reported, label, targetFreq);
   if (freq > 0.0f) {
+    // Update OLED tuning screen with live pitch data
+    String currentNoteStr = getNoteName(freq);
+    String targetNoteStr  = getNoteName(targetFreq);
+    UI::setTuningDisplay(currentNoteStr.c_str(), targetNoteStr.c_str(), label, freq > targetFreq);
+
     float absCents = fabsf(getCentsOffTarget(targetFreq, freq));
     float t        = constrain((absCents - 2.0f) / (CENTS_MAX_CLAMP - 2.0f), 0.0f, 1.0f);
     int   spinMs   = MIN_SPINS_MS + (int)(t * (MAX_SPINS_MS - MIN_SPINS_MS));
 
-    motor.tune(targetFreq, freq);
+    motor.tune(targetFreq, freq, strIdx);
     delay(spinMs);  // brief delay to allow motor response before processing next string
     motor.stopAllMotors();
     delay(600);         // wait for string to stop vibrating from motor

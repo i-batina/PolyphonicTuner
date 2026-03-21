@@ -20,5 +20,3 @@ void ADCDriver::begin() {
   digitalWriteFast(Pin_RESET, LOW);
   delay(10);
 }
-
-constexpr int ADCDriver::DBUS[16];

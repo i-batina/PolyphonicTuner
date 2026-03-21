@@ -194,7 +194,8 @@ void test_median_single_element() {
 // ── Entry point ───────────────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
-  while (!Serial && millis() < 3000) {}  // wait for USB enumeration
+  while (!Serial && millis() < 3000) {
+  }  // wait for USB enumeration
 
   UNITY_BEGIN();
 

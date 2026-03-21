@@ -4,6 +4,12 @@
 #include <Arduino.h>
 #include "Tuner.h"
 
+struct Tuning {
+  const char* name;
+  const char* notes[6];
+  float       freqs[6];
+};
+
 class Processing {
  private:
   static constexpr float SAMPLE_RATE = 16000.0f;
@@ -82,6 +88,14 @@ class Processing {
   // Array of note names
   static constexpr const char* _noteNames[12] = {
       "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+
+  // Alternate tunings
+  static constexpr Tuning _tunings[] = {{"Standard", {"E", "A", "D", "G", "B", "e"},
+                                            {82.41f, 110.0f, 146.8f, 196.0f, 246.9f, 329.6f}},
+      {"Drop D", {"D", "A", "D", "G", "B", "e"}, {73.42f, 110.0f, 146.8f, 196.0f, 246.9f, 329.6f}},
+      {"Open G", {"D", "G", "D", "G", "B", "D"}, {73.42f, 98.0f, 146.8f, 196.0f, 246.9f, 146.8f}},
+      {"Open D", {"D", "A", "D", "F#", "A", "D"},
+          {73.42f, 110.0f, 146.8f, 185.0f, 110.0f, 73.42f}}};
 };
 
 #endif  // PROCESSING_H
