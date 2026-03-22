@@ -115,14 +115,14 @@ void Processing::sampleISR() {
   adc.startConversion();
   delayMicroseconds(5);  // tCONV max = 4.2 us (AD7606, 8-ch, no oversampling)
 
-  int16_t samples[6];
-  adc.readChannels(samples, 6);
-  tunerLowE.addSample(samples[0]);
-  tunerA.addSample(samples[2]);
-  tunerD.addSample(samples[1]);
-  tunerG.addSample(samples[3]);
-  tunerB.addSample(samples[4]);
-  tunerHiE.addSample(samples[5]);
+  int16_t samples[4];
+  adc.readChannels(samples, 4);     // was 6
+  tunerLowE.addSample(samples[0]);  // ADC 1 Low E
+  tunerA.addSample(samples[0]);     // ADC 2 A
+  tunerD.addSample(samples[0]);     // ADC 3 D
+  tunerG.addSample(samples[0]);     // ADC 4 G
+  tunerB.addSample(samples[3]);     // ADC 3 shares B
+  tunerHiE.addSample(samples[3]);   // ADC 4 shares Hi E
 }
 
 void Processing::setup() {
@@ -203,7 +203,7 @@ void Processing::loop() {
     float cents    = getCentsOffTarget(targetHz, freq);
     float absCents = fabsf(cents);
 
-    if (absCents < 4.0f) {
+    if (absCents < 10.0f) {
       // In tune, brief display of tuning screen, then advance
       delay(600);
       _currentStringIdx++;
@@ -215,6 +215,14 @@ void Processing::loop() {
             _tunings[tuningIdx].freqs[ni]);
       }
     } else {
+      // TODO: consider:
+      // 1. Add "Tuning up/down" text to the UI
+      // 2. Add real time frequency and cents display to the UI? maybe for debugging
+      // 3. maybe add a "calibration mode" that shows real-time frequency and cents to target, to
+      // help set the CENTS_MAX_CLAMP and spin timing parameters based on observed motor response
+      // 4. let user skip tuning a string by pressing next and back without tuning to target, in
+      // case of broken string or other issue
+      // 5. When changing direction, spin motor at full speed for a brief reverse pulse, 80 ms?
       float norm   = constrain((absCents - 2.0f) / (CENTS_MAX_CLAMP - 2.0f), 0.0f, 1.0f);
       int   spinMs = MIN_SPINS_MS + (int)(norm * (MAX_SPINS_MS - MIN_SPINS_MS));
       motor.tune(targetHz, freq, i);

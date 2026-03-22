@@ -46,9 +46,9 @@ class Processing {
  private:
   static constexpr float SAMPLE_RATE     = 16000.0f;
   static constexpr int   MEDIAN_FRAMES   = 5;
-  static constexpr int   MIN_SPINS_MS    = 60;
-  static constexpr int   MAX_SPINS_MS    = 600;
-  static constexpr float CENTS_MAX_CLAMP = 50.0f;
+  static constexpr int   MIN_SPINS_MS    = 60;     // TODO: tune this param based on testing
+  static constexpr int   MAX_SPINS_MS    = 600;    // keep for large deviations
+  static constexpr float CENTS_MAX_CLAMP = 50.0f;  // TODO: tune this param based on testing
 
   // Frequency gates — wide enough to cover all four alternate tunings
   static constexpr float MIN_HZ[6] = {50.0f, 95.0f, 125.0f, 165.0f, 215.0f, 280.0f};

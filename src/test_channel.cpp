@@ -723,14 +723,14 @@ static constexpr uint8_t     ADC_CH    = 2;
 static constexpr const char* LABEL     = "D";
 static constexpr float       TARGET_HZ = 146.83f;
 static constexpr float       GATE_MIN  = 120.0f;
-static constexpr float       GATE_MAX  = 200.0f;
-static constexpr uint8_t     ADC_CH    = 3;
+static constexpr float       GATE_MAX  = 165.0f;
+static constexpr uint8_t     ADC_CH    = ;
 
 #elif MOTOR_MANUAL_TEST == 4
 static constexpr const char* LABEL     = "G";
 static constexpr float       TARGET_HZ = 196.0f;
-static constexpr float       GATE_MIN  = 150.0f;
-static constexpr float       GATE_MAX  = 250.0f;
+static constexpr float       GATE_MIN  = 170.0f;
+static constexpr float       GATE_MAX  = 220.0f;
 static constexpr uint8_t     ADC_CH    = 4;
 
 #elif MOTOR_MANUAL_TEST == 5
@@ -738,14 +738,14 @@ static constexpr const char* LABEL     = "B";
 static constexpr float       TARGET_HZ = 246.94f;
 static constexpr float       GATE_MIN  = 200.0f;
 static constexpr float       GATE_MAX  = 300.0f;
-static constexpr uint8_t     ADC_CH    = 5;
+static constexpr uint8_t     ADC_CH    = 4;
 
 #elif MOTOR_MANUAL_TEST == 6
 static constexpr const char* LABEL     = "High E";
 static constexpr float       TARGET_HZ = 329.63f;
 static constexpr float       GATE_MIN  = 300.0f;
 static constexpr float       GATE_MAX  = 400.0f;
-static constexpr uint8_t     ADC_CH    = 6;
+static constexpr uint8_t     ADC_CH    = 4;
 
 #else
 #error "MOTOR_MANUAL_TEST must be 1-6 (1=Low E, 2=A, 3=D, 4=G, 5=B, 6=High E)"
@@ -761,8 +761,8 @@ static constexpr int FINE_PULSE_MS   = 80;
 static constexpr int COARSE_PULSE_MS = 400;
 
 // -- Auto-tune timing (mirrors Processing::loopProcessHelper) -----------------
-static constexpr float CENTS_MAX_CLAMP = 50.0f;
-static constexpr int   MIN_SPINS_MS    = 60;
+static constexpr float CENTS_MAX_CLAMP = 60.0f;
+static constexpr int   MIN_SPINS_MS    = 150;
 static constexpr int   MAX_SPINS_MS    = 600;
 static constexpr int   SETTLE_MS       = 600;  // wait after motor stops before re-sampling
 
