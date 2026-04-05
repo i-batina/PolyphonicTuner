@@ -51,6 +51,18 @@ void MotorControl::tune(float targetFreq, float currentFreq, int channel) {
     return;
   }
 
+  bool tuningUp = cents < 0.0f;  // flat, so tighten
+  channel       = constrain(channel, 0, NUM_MOTORS - 1);
+
+  // Backlash compensation. On dirn reversal, fire full speed pulse to take up mechanical slack
+  if (_hasLastDir[channel] && tuningUp != _lastTuneUp[channel]) {
+    driveRaw(tuningUp, MAX_SPEED, channel);
+    delay(BACKLASH_PULSE_MS);
+    stopAllMotors();
+  }
+  _lastTuneUp[channel] = tuningUp;
+  _hasLastDir[channel] = true;
+
   // Speed: full beyond CENTS_FULL_SPEED, linear ramp down to MIN_SPEED at TUNE_THRESHOLD
   int speed;
   if (absCents >= CENTS_FULL_SPEED) {
@@ -60,7 +72,6 @@ void MotorControl::tune(float targetFreq, float currentFreq, int channel) {
     speed   = MIN_SPEED + (int)(t * (MAX_SPEED - MIN_SPEED));
   }
 
-  channel = constrain(channel, 0, NUM_MOTORS - 1);
   if (cents > 0.0f) {
     // Sharp: tune down (loosen string)
     analogWrite(MOTOR_PINS[channel][0], speed);

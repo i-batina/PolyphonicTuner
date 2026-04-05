@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "display.h"
+#include "../Processing.h"
 #include <string.h>
 
 static Display display;
@@ -12,7 +13,7 @@ static int getOptionCountForState(UIState state) {
     case SCREEN_HOME:
       return 3;
     case SCREEN_SELECT_TUNING:
-      return 4;  // 4 named tunings
+      return Processing::getSizeTuneLst();
     case SCREEN_SETTINGS:
       return 3;
     case SCREEN_TUNING:
@@ -116,7 +117,7 @@ void UI::handleSelect() {
       break;
 
     case SCREEN_SELECT_TUNING:
-      // selectedIndex 0–3 IS the tuning choice; pressing Select starts tuning
+      // selectedIndex 0–4 IS the tuning choice; pressing Select starts tuning
       _selectedTuningIdx = selectedIndex;
       tuningActive       = true;
       selectedIndex      = 0;

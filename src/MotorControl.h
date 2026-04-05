@@ -27,6 +27,14 @@ class MotorControl {
   bool isTargetReached(float targetFreq, float currentFreq, float centsOffTarget);
 
  private:
+  static constexpr int NUM_MOTORS        = 6;
+  static constexpr int PWM_FREQ          = 20000;  // 20 kHz for quieter operation
+  static constexpr int MAX_SPEED         = 250;    // Max PWM value
+  static constexpr int TUNE_THRESHOLD    = 6;      // cents
+  static constexpr int CENTS_FULL_SPEED  = 40;     // cents error at which to apply full speed
+  static constexpr int MIN_SPEED         = 170;  // Minimum speed to overcome motor static friction
+  static constexpr int BACKLASH_PULSE_MS = 80;   // Tune based on observed slacking
+
   // All 6 motor channels indexed [0]=Low E ... [5]=High E.
   // Each entry is {AIN1, AIN2} - the two PWM pins for that H-bridge half.
   static constexpr int MOTOR_PINS[6][2] = {
@@ -38,12 +46,9 @@ class MotorControl {
       {22, 23},  // [5] High E - D3_BIN
   };
 
-  static constexpr int NUM_MOTORS       = 6;
-  static constexpr int PWM_FREQ         = 20000;  // 20 kHz for quieter operation
-  static constexpr int MAX_SPEED        = 250;    // Max PWM value
-  static constexpr int TUNE_THRESHOLD   = 4;      // cents
-  static constexpr int CENTS_FULL_SPEED = 40;     // cents error at which to apply full speed
-  static constexpr int MIN_SPEED        = 170;    // Minimum speed to overcome motor static friction
+  // Dirn memory for backlash compensation
+  bool _lastTuneUp[NUM_MOTORS] = {};
+  bool _hasLastDir[NUM_MOTORS] = {};  // false until first tune() call
 };
 
 #endif  // MOTOR_CONTROL_H

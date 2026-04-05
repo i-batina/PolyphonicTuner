@@ -36,19 +36,27 @@ void Display::drawHomeScreen(int selectedIndex) {
 }
 
 void Display::drawSelectTuningScreen(int selectedIndex) {
-  static constexpr const char* TUNING_NAMES[4] = {
-      "Standard  E A D G B e",
+  static constexpr const char* TUNING_NAMES[] = {
+      "E Std.    E A D G B e",
+      "D Std.    D G C F A D",
       "Drop D    D A D G B e",
       "Open G    D G D G B D",
       "Open D    D A D F#A D",
+      "E Flat    EbAbDbGbBbeb",
   };
+
+  const int VISIBLE      = 4;
+  const int TOTAL        = sizeof(TUNING_NAMES) / sizeof(TUNING_NAMES[0]);
+  int       scrollOffset = (selectedIndex >= VISIBLE) ? selectedIndex - VISIBLE + 1 : 0;
 
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x10_tr);
   u8g2.drawStr(0, 10, "Select Tuning:");
 
-  for (int i = 0; i < 4; i++) {
-    int y = 22 + i * 12;
+  for (int row = 0; row < VISIBLE; row++) {
+    int i = row + scrollOffset;
+    if (i >= TOTAL) break;
+    int y = 22 + row * 12;
     if (i == selectedIndex) {
       u8g2.drawBox(0, y - 9, 128, 11);
       u8g2.setDrawColor(0);
